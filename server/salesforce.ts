@@ -222,17 +222,46 @@ function resolveFilterField(filter: any, config: ReportTypeConfig): string | nul
   return null;
 }
 
+const BOOLEAN_FIELDS = new Set([
+  "hasoptedoutofemail",
+  "contact.hasoptedoutofemail",
+  "donotcall",
+  "contact.donotcall",
+  "hasoptedoutoffax",
+  "contact.hasoptedoutoffax",
+  "isdeleted",
+  "contact.isdeleted",
+]);
+
+function isBooleanValue(val: string): boolean {
+  const v = val.toLowerCase().trim();
+  return v === "true" || v === "false" || v === "1" || v === "0";
+}
+
+function toBooleanLiteral(val: string): string {
+  const v = val.toLowerCase().trim();
+  return (v === "true" || v === "1") ? "true" : "false";
+}
+
+function formatSOQLValue(field: string, val: string): string {
+  if (BOOLEAN_FIELDS.has(field.toLowerCase()) || isBooleanValue(val)) {
+    return toBooleanLiteral(val);
+  }
+  return `'${escapeSOQL(val)}'`;
+}
+
 function buildFilterClause(field: string, op: string, val: string): string | null {
+  const formatted = formatSOQLValue(field, val);
   switch (op) {
-    case "equals": return `${field} = '${escapeSOQL(val)}'`;
-    case "notEqual": return `${field} != '${escapeSOQL(val)}'`;
+    case "equals": return `${field} = ${formatted}`;
+    case "notEqual": return `${field} != ${formatted}`;
     case "contains": return `${field} LIKE '%${escapeSOQL(val)}%'`;
     case "notContain": return `(NOT ${field} LIKE '%${escapeSOQL(val)}%')`;
     case "startsWith": return `${field} LIKE '${escapeSOQL(val)}%'`;
-    case "greaterThan": return `${field} > '${escapeSOQL(val)}'`;
-    case "lessThan": return `${field} < '${escapeSOQL(val)}'`;
-    case "greaterOrEqual": return `${field} >= '${escapeSOQL(val)}'`;
-    case "lessOrEqual": return `${field} <= '${escapeSOQL(val)}'`;
+    case "greaterThan": return `${field} > ${formatted}`;
+    case "lessThan": return `${field} < ${formatted}`;
+    case "greaterOrEqual": return `${field} >= ${formatted}`;
+    case "lessOrEqual": return `${field} <= ${formatted}`;
     default: return null;
   }
 }
