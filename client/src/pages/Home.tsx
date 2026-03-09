@@ -316,6 +316,16 @@ export default function Home() {
               >
                 {step === "fetching" ? <Loader2 className="w-4 h-4 animate-spin" /> : "Fetch Data"}
               </Button>
+              {step !== "idle" && step !== "fetching" && (
+                <Button
+                  onClick={reset}
+                  variant="outline"
+                  className="w-32 text-xs"
+                  data-testid="button-start-over"
+                >
+                  Start Over
+                </Button>
+              )}
             </div>
 
             <ArrowRight className="w-5 h-5 text-neutral-300 hidden md:block" />
