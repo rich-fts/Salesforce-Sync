@@ -32,54 +32,116 @@ export async function getMarketingLists(): Promise<{ id: string; name: string; c
   }));
 }
 
-export async function getListContactEmails(listId: string): Promise<Set<string>> {
+const EMAIL_SEARCH_BATCH_SIZE = 100;
+
+export async function getListContactEmails(listId: string, emailsToCheck?: string[]): Promise<Set<string>> {
   const apiKey = process.env.SENDGRID_API_KEY;
   if (!apiKey) throw new Error("SENDGRID_API_KEY is not configured.");
 
-  const emails = new Set<string>();
-  const query = `CONTAINS(list_ids, '${listId}')`;
-  let page = 1;
-  let hasMore = true;
+  const foundEmails = new Set<string>();
 
-  log(`Fetching existing contacts from SendGrid list ${listId}...`, "sendgrid");
+  if (emailsToCheck && emailsToCheck.length > 0) {
+    log(`Checking ${emailsToCheck.length} emails against SendGrid via search/emails endpoint...`, "sendgrid");
 
-  while (hasMore) {
-    const response = await fetch("https://api.sendgrid.com/v3/marketing/contacts/search", {
+    for (let i = 0; i < emailsToCheck.length; i += EMAIL_SEARCH_BATCH_SIZE) {
+      const batch = emailsToCheck.slice(i, i + EMAIL_SEARCH_BATCH_SIZE);
+      const batchNum = Math.floor(i / EMAIL_SEARCH_BATCH_SIZE) + 1;
+      const totalBatches = Math.ceil(emailsToCheck.length / EMAIL_SEARCH_BATCH_SIZE);
+
+      const response = await fetch("https://api.sendgrid.com/v3/marketing/contacts/search/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ emails: batch }),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        if (response.status === 404) {
+          log(`Batch ${batchNum}/${totalBatches}: none found`, "sendgrid");
+          continue;
+        }
+        log(`SendGrid search/emails error on batch ${batchNum}: ${response.status} - ${errorBody}`, "sendgrid");
+        throw new Error(`SendGrid search/emails API error ${response.status}: ${errorBody}`);
+      }
+
+      const data = await response.json();
+      const result = data.result || {};
+
+      for (const [email, contactData] of Object.entries(result as Record<string, any>)) {
+        if (contactData.contact) {
+          const contactListIds: string[] = contactData.contact.list_ids || [];
+          if (contactListIds.includes(listId)) {
+            foundEmails.add(email.toLowerCase().trim());
+          }
+        }
+      }
+
+      log(`Batch ${batchNum}/${totalBatches}: found ${foundEmails.size} matches so far`, "sendgrid");
+    }
+  } else {
+    log(`No emails to check, using export to get all contacts from list ${listId}...`, "sendgrid");
+
+    const exportResponse = await fetch("https://api.sendgrid.com/v3/marketing/contacts/exports", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ list_ids: [listId] }),
     });
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      log(`SendGrid search error: ${response.status} - ${errorBody}`, "sendgrid");
-      if (response.status === 404) {
-        return emails;
-      }
-      throw new Error(`SendGrid search API error ${response.status}: ${errorBody}`);
+    if (!exportResponse.ok) {
+      const errorBody = await exportResponse.text();
+      throw new Error(`SendGrid export API error ${exportResponse.status}: ${errorBody}`);
     }
 
-    const data = await response.json();
-    const results = data.result || [];
+    const exportData = await exportResponse.json();
+    const exportId = exportData.id;
+    log(`Export started with ID: ${exportId}, polling for completion...`, "sendgrid");
 
-    for (const contact of results) {
-      if (contact.email) {
-        emails.add(contact.email.toLowerCase().trim());
+    let downloadUrls: string[] = [];
+    for (let attempt = 0; attempt < 60; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+
+      const statusResponse = await fetch(`https://api.sendgrid.com/v3/marketing/contacts/exports/${exportId}`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+
+      if (!statusResponse.ok) continue;
+
+      const statusData = await statusResponse.json();
+      if (statusData.status === "ready") {
+        downloadUrls = statusData.urls || [];
+        break;
+      } else if (statusData.status === "failure") {
+        throw new Error("SendGrid export failed");
       }
+
+      log(`Export status: ${statusData.status}, waiting...`, "sendgrid");
     }
 
-    if (results.length < 50 || !data._metadata?.next) {
-      hasMore = false;
-    } else {
-      page++;
+    for (const url of downloadUrls) {
+      const csvResponse = await fetch(url);
+      const csvText = await csvResponse.text();
+      const lines = csvText.split("\n");
+      const headers = lines[0]?.split(",").map((h) => h.trim().toLowerCase()) || [];
+      const emailIdx = headers.indexOf("email");
+
+      if (emailIdx === -1) continue;
+
+      for (let j = 1; j < lines.length; j++) {
+        const cols = lines[j].split(",");
+        const email = cols[emailIdx]?.trim();
+        if (email) foundEmails.add(email.toLowerCase());
+      }
     }
   }
 
-  log(`Found ${emails.size} existing contacts in SendGrid list`, "sendgrid");
-  return emails;
+  log(`Found ${foundEmails.size} existing contacts in SendGrid list`, "sendgrid");
+  return foundEmails;
 }
 
 let cachedCompanyFieldId: string | null = null;

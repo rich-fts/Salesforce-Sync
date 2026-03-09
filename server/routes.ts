@@ -51,7 +51,8 @@ export async function registerRoutes(
 
       let sendgridEmails = new Set<string>();
       if (listId) {
-        sendgridEmails = await getListContactEmails(listId);
+        const allEmails = sfContacts.map((c) => c.email);
+        sendgridEmails = await getListContactEmails(listId, allEmails);
       }
 
       const contactsToSync = sfContacts.filter((c) => !sendgridEmails.has(c.email));
