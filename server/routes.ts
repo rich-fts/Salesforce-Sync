@@ -83,6 +83,27 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/contacts/pending", async (_req, res) => {
+    try {
+      const unsynced = await storage.getUnsyncedContacts();
+      const all = await storage.getAllContacts();
+      const syncedCount = all.length - unsynced.length;
+      res.json({
+        total: all.length,
+        unsynced: unsynced.length,
+        synced: syncedCount,
+        contacts: unsynced.map((c) => ({
+          firstName: c.firstName,
+          lastName: c.lastName,
+          email: c.email,
+          company: c.company,
+        })),
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.get("/api/sendgrid/lists", async (_req, res) => {
     try {
       const lists = await getMarketingLists();

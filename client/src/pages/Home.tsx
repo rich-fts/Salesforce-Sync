@@ -63,6 +63,27 @@ export default function Home() {
     }
   }, [configStatus?.sendgrid]);
 
+  useEffect(() => {
+    if (configStatus?.salesforce && configStatus?.sendgrid && step === "idle") {
+      fetch("/api/contacts/pending")
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.unsynced > 0) {
+            setContactsToSync(data.contacts);
+            setAlreadyInSendGrid(data.synced);
+            setPulledContacts(data.contacts);
+            setStep("ready");
+            setProgress(100);
+            toast({
+              title: "Pending Contacts Found",
+              description: `${data.unsynced} contacts from a previous fetch are ready to push to SendGrid.`,
+            });
+          }
+        })
+        .catch(() => {});
+    }
+  }, [configStatus?.salesforce, configStatus?.sendgrid]);
+
   const handleFetchReport = async () => {
     setStep("fetching");
     setProgress(30);
