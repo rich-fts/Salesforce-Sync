@@ -22,7 +22,7 @@ export default function Home() {
   const [newContacts, setNewContacts] = useState<Contact[]>([]);
   const [syncLogId, setSyncLogId] = useState<string | null>(null);
   const [sendGridLists, setSendGridLists] = useState<SendGridList[]>([]);
-  const [selectedListId, setSelectedListId] = useState<string>("");
+  const [selectedListId, setSelectedListId] = useState<string>("115297bb-7915-4671-bdcf-2d4037d6802a");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,7 +53,7 @@ export default function Home() {
         .then((data) => {
           if (Array.isArray(data)) {
             setSendGridLists(data);
-            if (data.length > 0) setSelectedListId(data[0].id);
+            if (!selectedListId && data.length > 0) setSelectedListId(data[0].id);
           }
         })
         .catch(() => {});
@@ -305,7 +305,7 @@ export default function Home() {
                     <SelectTrigger className="w-44 h-8 text-xs" data-testid="select-sendgrid-list">
                       <SelectValue placeholder="Select list" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="max-h-60 overflow-y-auto">
                       {sendGridLists.map((list) => (
                         <SelectItem key={list.id} value={list.id}>
                           {list.name} ({list.contact_count})

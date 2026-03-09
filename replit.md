@@ -33,8 +33,9 @@ A full-stack application that pulls contacts from a Salesforce report (first nam
 - `SALESFORCE_ACCESS_TOKEN` - Salesforce OAuth token (from Replit connector)
 - `SENDGRID_API_KEY` - SendGrid API key (user-provided secret)
 
-## Default Salesforce Report
-- Report ID: `00OJw00000FMqtlMAD` (pre-selected in the UI dropdown)
+## Defaults
+- Salesforce Report ID: `00OJw00000FMqtlMAD` (pre-selected in the UI dropdown)
+- SendGrid List: `Daily Market News` (ID: `115297bb-7915-4671-bdcf-2d4037d6802a`, pre-selected)
 
 ## Workflow
 1. User clicks "Fetch Data" to pull contacts from Salesforce
