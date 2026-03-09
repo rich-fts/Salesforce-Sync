@@ -132,7 +132,7 @@ export default function Home() {
       const res = await fetch("/api/sendgrid/push", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ listId: selectedListId, syncLogId, contacts: contactsToSync }),
+        body: JSON.stringify({ listId: selectedListId, syncLogId }),
       });
 
       if (!res.ok) {

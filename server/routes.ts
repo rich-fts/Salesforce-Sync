@@ -94,12 +94,14 @@ export async function registerRoutes(
 
   app.post("/api/sendgrid/push", async (req, res) => {
     try {
-      const { listId, syncLogId, contacts: contactsToPush } = req.body;
+      const { listId, syncLogId } = req.body;
       if (!listId) {
         return res.status(400).json({ message: "listId is required" });
       }
 
-      if (!contactsToPush || contactsToPush.length === 0) {
+      const contactsToPush = await storage.getUnsyncedContacts();
+
+      if (contactsToPush.length === 0) {
         return res.json({ message: "No contacts to sync", synced: 0 });
       }
 
@@ -109,7 +111,7 @@ export async function registerRoutes(
 
       const result = await addContactsToList(listId, contactsToPush);
 
-      await storage.markContactsSynced(contactsToPush.map((c: any) => c.email));
+      await storage.markContactsSynced(contactsToPush.map((c) => c.email));
 
       if (syncLogId) {
         await storage.updateSyncLogStatus(syncLogId, "complete", contactsToPush.length);
