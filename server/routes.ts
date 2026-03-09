@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { fetchSalesforceReport } from "./salesforce";
+import { fetchSalesforceReport, isSalesforceConnected } from "./salesforce";
 import { addContactsToList, getMarketingLists } from "./sendgrid";
 import type { InsertContact } from "@shared/schema";
 
@@ -111,8 +111,9 @@ export async function registerRoutes(
   });
 
   app.get("/api/config/status", async (_req, res) => {
+    const sfConnected = await isSalesforceConnected();
     res.json({
-      salesforce: !!(process.env.SALESFORCE_INSTANCE_URL && process.env.SALESFORCE_ACCESS_TOKEN),
+      salesforce: sfConnected,
       sendgrid: !!process.env.SENDGRID_API_KEY,
     });
   });
