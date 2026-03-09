@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { fetchSalesforceReport, isSalesforceConnected } from "./salesforce";
+import { fetchSalesforceReport, isSalesforceConnected, listSalesforceReports } from "./salesforce";
 import { addContactsToList, getMarketingLists } from "./sendgrid";
 import type { InsertContact } from "@shared/schema";
 
@@ -19,9 +19,19 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/salesforce/pull", async (_req, res) => {
+  app.get("/api/salesforce/reports", async (_req, res) => {
     try {
-      const sfContacts = await fetchSalesforceReport();
+      const reports = await listSalesforceReports();
+      res.json(reports);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/salesforce/pull", async (req, res) => {
+    try {
+      const { reportId } = req.body || {};
+      const sfContacts = await fetchSalesforceReport(reportId || undefined);
 
       const existingContacts = await storage.getAllContacts();
       const existingEmails = new Set(existingContacts.map((c) => c.email));
@@ -46,13 +56,10 @@ export async function registerRoutes(
         status: "pulled",
       });
 
-      const allContacts = await storage.getAllContacts();
-
       res.json({
         syncLogId: syncLog.id,
         totalPulled: sfContacts.length,
         newContacts: savedNew.length,
-        allContacts,
         pulledContacts: sfContacts,
         newContactDetails: savedNew,
       });
@@ -83,6 +90,10 @@ export async function registerRoutes(
         return res.json({ message: "No new contacts to sync", synced: 0 });
       }
 
+      if (syncLogId) {
+        await storage.updateSyncLogStatus(syncLogId, "uploading");
+      }
+
       const result = await addContactsToList(listId, unsyncedContacts);
 
       await storage.markContactsSynced(unsyncedContacts.map((c) => c.email));
@@ -97,6 +108,9 @@ export async function registerRoutes(
         contacts: unsyncedContacts,
       });
     } catch (err: any) {
+      if (req.body?.syncLogId) {
+        await storage.updateSyncLogStatus(req.body.syncLogId, "failed").catch(() => {});
+      }
       res.status(500).json({ message: err.message });
     }
   });

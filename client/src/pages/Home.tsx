@@ -1,12 +1,12 @@
 import { useState, useEffect } from "react";
-import type { Contact, PullResult, SendGridList, ConfigStatus } from "@/lib/mock-data";
+import type { Contact, PullResult, SendGridList, ConfigStatus, SalesforceReport } from "@/lib/mock-data";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowRight, CloudDownload, Send, AlertCircle, UserPlus, CheckCircle2, Loader2 } from "lucide-react";
+import { ArrowRight, CloudDownload, Send, AlertCircle, UserPlus, CheckCircle2, Loader2, FileText } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 
 type SyncStep = "idle" | "fetching" | "analyzing" | "ready" | "uploading" | "complete";
@@ -15,6 +15,9 @@ export default function Home() {
   const { toast } = useToast();
   const [step, setStep] = useState<SyncStep>("idle");
   const [configStatus, setConfigStatus] = useState<ConfigStatus | null>(null);
+  const [sfReports, setSfReports] = useState<SalesforceReport[]>([]);
+  const [selectedReportId, setSelectedReportId] = useState<string>("__all__");
+  const [loadingReports, setLoadingReports] = useState(false);
   const [pulledContacts, setPulledContacts] = useState<{ firstName: string; lastName: string; email: string; company: string }[]>([]);
   const [newContacts, setNewContacts] = useState<Contact[]>([]);
   const [syncLogId, setSyncLogId] = useState<string | null>(null);
@@ -29,6 +32,19 @@ export default function Home() {
       .then((data) => setConfigStatus(data))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (configStatus?.salesforce) {
+      setLoadingReports(true);
+      fetch("/api/salesforce/reports")
+        .then((res) => res.json())
+        .then((data) => {
+          if (Array.isArray(data)) setSfReports(data);
+        })
+        .catch(() => {})
+        .finally(() => setLoadingReports(false));
+    }
+  }, [configStatus?.salesforce]);
 
   useEffect(() => {
     if (configStatus?.sendgrid) {
@@ -50,7 +66,17 @@ export default function Home() {
     setError(null);
 
     try {
-      const res = await fetch("/api/salesforce/pull", { method: "POST" });
+      const body: any = {};
+      if (selectedReportId && selectedReportId !== "__all__") {
+        body.reportId = selectedReportId;
+      }
+
+      const res = await fetch("/api/salesforce/pull", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
       if (!res.ok) {
         const errData = await res.json();
         throw new Error(errData.message || "Failed to pull report");
@@ -143,6 +169,10 @@ export default function Home() {
   const sfConfigured = configStatus?.salesforce ?? false;
   const sgConfigured = configStatus?.sendgrid ?? false;
 
+  const selectedReportName = selectedReportId === "__all__"
+    ? "All Contacts"
+    : sfReports.find((r) => r.id === selectedReportId)?.name || "Selected Report";
+
   return (
     <div className="min-h-screen bg-neutral-50/50 p-6 md:p-12">
       <div className="max-w-6xl mx-auto space-y-8">
@@ -198,6 +228,33 @@ export default function Home() {
                 <p className="font-medium text-sm">1. Pull Report</p>
                 <p className="text-xs text-neutral-500">Salesforce API</p>
               </div>
+
+              {/* Report Selector */}
+              {sfConfigured && step === "idle" && (
+                <div className="w-52">
+                  <Select value={selectedReportId} onValueChange={setSelectedReportId} disabled={loadingReports}>
+                    <SelectTrigger className="h-8 text-xs" data-testid="select-salesforce-report">
+                      <FileText className="w-3 h-3 mr-1.5 shrink-0 text-neutral-400" />
+                      <SelectValue placeholder={loadingReports ? "Loading reports..." : "Select a report"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all__">All Contacts (default)</SelectItem>
+                      {sfReports.map((report) => (
+                        <SelectItem key={report.id} value={report.id}>
+                          <span className="truncate">{report.name}</span>
+                          <span className="text-neutral-400 ml-1 text-[10px]">({report.folderName})</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              {step !== "idle" && (
+                <div className="text-xs text-neutral-500 bg-neutral-50 px-2 py-1 rounded">
+                  {selectedReportName}
+                </div>
+              )}
+
               <Button
                 onClick={handleFetchReport}
                 disabled={step !== "idle" || !sfConfigured}
@@ -245,7 +302,7 @@ export default function Home() {
               <div className="flex flex-col items-center gap-2">
                 {sgConfigured && sendGridLists.length > 0 && step === "ready" && (
                   <Select value={selectedListId} onValueChange={setSelectedListId}>
-                    <SelectTrigger className="w-40 h-8 text-xs" data-testid="select-sendgrid-list">
+                    <SelectTrigger className="w-44 h-8 text-xs" data-testid="select-sendgrid-list">
                       <SelectValue placeholder="Select list" />
                     </SelectTrigger>
                     <SelectContent>
@@ -292,7 +349,7 @@ export default function Home() {
                 <div className="flex justify-between items-center">
                   <div>
                     <CardTitle className="text-lg">Salesforce Report</CardTitle>
-                    <CardDescription>All contacts pulled from the latest report</CardDescription>
+                    <CardDescription>{selectedReportName}</CardDescription>
                   </div>
                   <Badge variant="secondary" data-testid="badge-total-count">{pulledContacts.length} Total</Badge>
                 </div>

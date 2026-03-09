@@ -37,3 +37,9 @@ export type ConfigStatus = {
   salesforce: boolean;
   sendgrid: boolean;
 };
+
+export type SalesforceReport = {
+  id: string;
+  name: string;
+  folderName: string;
+};
