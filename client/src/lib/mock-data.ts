@@ -38,6 +38,13 @@ export type SendGridList = {
 export type ConfigStatus = {
   salesforce: boolean;
   sendgrid: boolean;
+  mailchimp: boolean;
+};
+
+export type MailchimpAudience = {
+  id: string;
+  name: string;
+  member_count: number;
 };
 
 export type SalesforceReport = {

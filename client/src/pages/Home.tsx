@@ -1,25 +1,33 @@
 import { useState, useEffect } from "react";
-import type { Contact, PullResult, SendGridList, ConfigStatus, SalesforceReport } from "@/lib/mock-data";
+import type { Contact, PullResult, SendGridList, ConfigStatus, SalesforceReport, MailchimpAudience } from "@/lib/mock-data";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowRight, CloudDownload, Send, AlertCircle, UserPlus, CheckCircle2, Loader2, FileText } from "lucide-react";
+import { ArrowRight, CloudDownload, Send, AlertCircle, UserPlus, CheckCircle2, Loader2, FileText, Mail } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 
 type SyncStep = "idle" | "fetching" | "analyzing" | "ready" | "uploading" | "complete";
 
 type ContactToSync = { firstName: string; lastName: string; email: string; company: string };
 
+type DataSource = "salesforce" | "mailchimp";
+
 export default function Home() {
   const { toast } = useToast();
   const [step, setStep] = useState<SyncStep>("idle");
   const [configStatus, setConfigStatus] = useState<ConfigStatus | null>(null);
+  const [dataSource, setDataSource] = useState<DataSource>("salesforce");
+  const [fetchedSource, setFetchedSource] = useState<DataSource | null>(null);
+  const [fetchedSourceName, setFetchedSourceName] = useState<string>("");
   const [sfReports, setSfReports] = useState<SalesforceReport[]>([]);
   const [selectedReportId, setSelectedReportId] = useState<string>("00OJw00000FMqtlMAD");
   const [loadingReports, setLoadingReports] = useState(false);
+  const [mcAudiences, setMcAudiences] = useState<MailchimpAudience[]>([]);
+  const [selectedAudienceId, setSelectedAudienceId] = useState<string>("");
+  const [loadingAudiences, setLoadingAudiences] = useState(false);
   const [pulledContacts, setPulledContacts] = useState<ContactToSync[]>([]);
   const [contactsToSync, setContactsToSync] = useState<ContactToSync[]>([]);
   const [alreadyInSendGrid, setAlreadyInSendGrid] = useState(0);
@@ -50,6 +58,22 @@ export default function Home() {
   }, [configStatus?.salesforce]);
 
   useEffect(() => {
+    if (configStatus?.mailchimp) {
+      setLoadingAudiences(true);
+      fetch("/api/mailchimp/audiences")
+        .then((res) => res.json())
+        .then((data) => {
+          if (Array.isArray(data)) {
+            setMcAudiences(data);
+            if (!selectedAudienceId && data.length > 0) setSelectedAudienceId(data[0].id);
+          }
+        })
+        .catch(() => {})
+        .finally(() => setLoadingAudiences(false));
+    }
+  }, [configStatus?.mailchimp]);
+
+  useEffect(() => {
     if (configStatus?.sendgrid) {
       fetch("/api/sendgrid/lists")
         .then((res) => res.json())
@@ -64,7 +88,7 @@ export default function Home() {
   }, [configStatus?.sendgrid]);
 
   useEffect(() => {
-    if (configStatus?.salesforce && configStatus?.sendgrid && step === "idle") {
+    if ((configStatus?.salesforce || configStatus?.mailchimp) && configStatus?.sendgrid && step === "idle") {
       fetch("/api/contacts/pending")
         .then((res) => res.json())
         .then((data) => {
@@ -89,16 +113,28 @@ export default function Home() {
     setProgress(30);
     setError(null);
 
+    const currentSource = dataSource;
+    const currentSourceName = dataSource === "mailchimp" ? selectedAudienceName : selectedReportName;
+    setFetchedSource(currentSource);
+    setFetchedSourceName(currentSourceName);
+
     try {
-      const body: any = {};
-      if (selectedReportId && selectedReportId !== "__all__") {
-        body.reportId = selectedReportId;
-      }
-      if (selectedListId) {
-        body.listId = selectedListId;
+      let url: string;
+      let body: any = {};
+
+      if (currentSource === "mailchimp") {
+        url = "/api/mailchimp/pull";
+        body.audienceId = selectedAudienceId;
+        if (selectedListId) body.listId = selectedListId;
+      } else {
+        url = "/api/salesforce/pull";
+        if (selectedReportId && selectedReportId !== "__all__") {
+          body.reportId = selectedReportId;
+        }
+        if (selectedListId) body.listId = selectedListId;
       }
 
-      const res = await fetch("/api/salesforce/pull", {
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -106,13 +142,14 @@ export default function Home() {
 
       if (!res.ok) {
         const errData = await res.json();
-        throw new Error(errData.message || "Failed to pull report");
+        throw new Error(errData.message || "Failed to pull contacts");
       }
 
       setProgress(60);
       setStep("analyzing");
 
       const data: PullResult = await res.json();
+      const sourceName = dataSource === "mailchimp" ? "Mailchimp" : "Salesforce";
 
       setTimeout(() => {
         setPulledContacts(data.pulledContacts);
@@ -124,7 +161,7 @@ export default function Home() {
 
         toast({
           title: "Analysis Complete",
-          description: `${data.totalPulled} pulled from Salesforce. ${data.alreadyInSendGrid} already in SendGrid. ${data.contactsToSync} to push.`,
+          description: `${data.totalPulled} pulled from ${sourceName}. ${data.alreadyInSendGrid} already in SendGrid. ${data.contactsToSync} to push.`,
         });
       }, 800);
     } catch (err: any) {
@@ -219,14 +256,22 @@ export default function Home() {
     setSyncLogId(null);
     setProgress(0);
     setError(null);
+    setFetchedSource(null);
+    setFetchedSourceName("");
   };
 
   const sfConfigured = configStatus?.salesforce ?? false;
   const sgConfigured = configStatus?.sendgrid ?? false;
+  const mcConfigured = configStatus?.mailchimp ?? false;
+  const sourceConfigured = dataSource === "mailchimp" ? mcConfigured : sfConfigured;
 
   const selectedReportName = selectedReportId === "__all__"
     ? "All Contacts"
     : sfReports.find((r) => r.id === selectedReportId)?.name || "Selected Report";
+
+  const selectedAudienceName = mcAudiences.find((a) => a.id === selectedAudienceId)?.name || "Selected Audience";
+
+  const selectedSourceName = dataSource === "mailchimp" ? selectedAudienceName : selectedReportName;
 
   const selectedListName = sendGridLists.find((l) => l.id === selectedListId)?.name || "Selected List";
 
@@ -236,16 +281,16 @@ export default function Home() {
 
         <header>
           <h1 className="text-3xl font-bold tracking-tight text-neutral-900" data-testid="text-title">Contact Sync</h1>
-          <p className="text-neutral-500 mt-1">Salesforce to SendGrid Marketing Campaign Pipeline</p>
+          <p className="text-neutral-500 mt-1">Sync contacts to SendGrid Marketing Campaign Lists</p>
         </header>
 
-        {configStatus && (!sfConfigured || !sgConfigured) && (
+        {configStatus && (!sfConfigured && !mcConfigured || !sgConfigured) && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
             <div className="text-sm text-amber-800">
               <p className="font-medium mb-1">Configuration Needed</p>
               <ul className="space-y-1">
-                {!sfConfigured && <li>Salesforce is not connected. Please connect your Salesforce account.</li>}
+                {!sfConfigured && !mcConfigured && <li>No data source connected. Please connect Salesforce or add your MAILCHIMP_API_KEY.</li>}
                 {!sgConfigured && <li>SendGrid API key is not set. Please add your SENDGRID_API_KEY.</li>}
               </ul>
             </div>
@@ -272,11 +317,25 @@ export default function Home() {
                 <CloudDownload className="w-5 h-5" />
               </div>
               <div className="text-center">
-                <p className="font-medium text-sm">1. Pull Report</p>
-                <p className="text-xs text-neutral-500">Salesforce API</p>
+                <p className="font-medium text-sm">1. Pull Contacts</p>
+                <p className="text-xs text-neutral-500">{(fetchedSource || dataSource) === "mailchimp" ? "Mailchimp" : "Salesforce"} API</p>
               </div>
 
-              {sfConfigured && (step === "idle" || ((step === "complete" || step === "ready") && contactsToSync.length === 0)) && (
+              {(step === "idle" || ((step === "complete" || step === "ready") && contactsToSync.length === 0)) && (sfConfigured || mcConfigured) && (
+                <div className="w-52">
+                  <Select value={dataSource} onValueChange={(v) => setDataSource(v as DataSource)}>
+                    <SelectTrigger className="h-8 text-xs" data-testid="select-data-source">
+                      <SelectValue placeholder="Select source" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {sfConfigured && <SelectItem value="salesforce"><span className="flex items-center gap-1.5"><FileText className="w-3 h-3" /> Salesforce</span></SelectItem>}
+                      {mcConfigured && <SelectItem value="mailchimp"><span className="flex items-center gap-1.5"><Mail className="w-3 h-3" /> Mailchimp</span></SelectItem>}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {dataSource === "salesforce" && sfConfigured && (step === "idle" || ((step === "complete" || step === "ready") && contactsToSync.length === 0)) && (
                 <div className="w-52">
                   <Select value={selectedReportId} onValueChange={setSelectedReportId} disabled={loadingReports}>
                     <SelectTrigger className="h-8 text-xs" data-testid="select-salesforce-report">
@@ -295,15 +354,34 @@ export default function Home() {
                   </Select>
                 </div>
               )}
+
+              {dataSource === "mailchimp" && mcConfigured && (step === "idle" || ((step === "complete" || step === "ready") && contactsToSync.length === 0)) && (
+                <div className="w-52">
+                  <Select value={selectedAudienceId} onValueChange={setSelectedAudienceId} disabled={loadingAudiences}>
+                    <SelectTrigger className="h-8 text-xs" data-testid="select-mailchimp-audience">
+                      <Mail className="w-3 h-3 mr-1.5 shrink-0 text-neutral-400" />
+                      <SelectValue placeholder={loadingAudiences ? "Loading audiences..." : "Select an audience"} />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-60 overflow-y-auto">
+                      {mcAudiences.map((audience) => (
+                        <SelectItem key={audience.id} value={audience.id}>
+                          {audience.name} ({audience.member_count})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
               {step !== "idle" && !((step === "complete" || step === "ready") && contactsToSync.length === 0) && (
                 <div className="text-xs text-neutral-500 bg-neutral-50 px-2 py-1 rounded">
-                  {selectedReportName}
+                  {fetchedSourceName || selectedSourceName}
                 </div>
               )}
 
               <Button
                 onClick={handleFetchReport}
-                disabled={!(step === "idle" || (step === "complete" && contactsToSync.length === 0) || (step === "ready" && contactsToSync.length === 0)) || !sfConfigured}
+                disabled={!(step === "idle" || (step === "complete" && contactsToSync.length === 0) || (step === "ready" && contactsToSync.length === 0)) || !sourceConfigured || (dataSource === "mailchimp" && (!selectedAudienceId || loadingAudiences))}
                 className="w-32"
                 data-testid="button-fetch-report"
               >
@@ -426,8 +504,8 @@ export default function Home() {
               <CardHeader className="pb-4">
                 <div className="flex justify-between items-center">
                   <div>
-                    <CardTitle className="text-lg">Salesforce Report</CardTitle>
-                    <CardDescription>{selectedReportName}</CardDescription>
+                    <CardTitle className="text-lg">{(fetchedSource || dataSource) === "mailchimp" ? "Mailchimp Audience" : "Salesforce Report"}</CardTitle>
+                    <CardDescription>{fetchedSourceName || selectedSourceName}</CardDescription>
                   </div>
                   <Badge variant="secondary" data-testid="badge-total-count">{pulledContacts.length} Total</Badge>
                 </div>

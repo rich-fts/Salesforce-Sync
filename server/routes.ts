@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { fetchSalesforceReport, isSalesforceConnected, listSalesforceReports } from "./salesforce";
 import { addContactsToList, getMarketingLists, getListContactEmails } from "./sendgrid";
+import { fetchMailchimpAudienceContacts, isMailchimpConnected, listMailchimpAudiences } from "./mailchimp";
 import type { InsertContact } from "@shared/schema";
 
 export async function registerRoutes(
@@ -166,11 +167,78 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/mailchimp/audiences", async (_req, res) => {
+    try {
+      const audiences = await listMailchimpAudiences();
+      res.json(audiences);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/mailchimp/pull", async (req, res) => {
+    try {
+      const { audienceId, listId } = req.body || {};
+      if (!audienceId) {
+        return res.status(400).json({ message: "audienceId is required" });
+      }
+
+      const mcContacts = await fetchMailchimpAudienceContacts(audienceId);
+
+      await storage.deleteAllContacts();
+
+      const allContactsData: InsertContact[] = mcContacts.map((c) => ({
+        firstName: c.firstName,
+        lastName: c.lastName,
+        email: c.email,
+        company: c.company,
+        source: "mailchimp",
+        syncedToSendgrid: false,
+      }));
+
+      const savedNew = await storage.createContacts(allContactsData);
+
+      let sendgridEmails = new Set<string>();
+      if (listId) {
+        const allEmails = mcContacts.map((c) => c.email);
+        sendgridEmails = await getListContactEmails(listId, allEmails);
+      }
+
+      const contactsToSync = mcContacts.filter((c) => !sendgridEmails.has(c.email));
+
+      await storage.syncFlagsFromSendGrid(
+        mcContacts.map((c) => c.email),
+        sendgridEmails
+      );
+
+      const syncLog = await storage.createSyncLog({
+        totalPulled: mcContacts.length,
+        newContacts: savedNew.length,
+        syncedToSendgrid: 0,
+        status: "pulled",
+      });
+
+      res.json({
+        syncLogId: syncLog.id,
+        totalPulled: mcContacts.length,
+        newContacts: savedNew.length,
+        alreadyInSendGrid: sendgridEmails.size,
+        contactsToSync: contactsToSync.length,
+        pulledContacts: mcContacts,
+        newContactDetails: savedNew,
+        contactsToSyncDetails: contactsToSync,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.get("/api/config/status", async (_req, res) => {
     const sfConnected = await isSalesforceConnected();
     res.json({
       salesforce: sfConnected,
       sendgrid: !!process.env.SENDGRID_API_KEY,
+      mailchimp: isMailchimpConnected(),
     });
   });
 
