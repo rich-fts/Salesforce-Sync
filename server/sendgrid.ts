@@ -82,6 +82,46 @@ export async function getListContactEmails(listId: string): Promise<Set<string>>
   return emails;
 }
 
+let cachedCompanyFieldId: string | null = null;
+
+async function getCompanyCustomFieldId(): Promise<string | null> {
+  if (cachedCompanyFieldId) return cachedCompanyFieldId;
+
+  const apiKey = process.env.SENDGRID_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const response = await fetch("https://api.sendgrid.com/v3/marketing/field_definitions", {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    });
+
+    if (!response.ok) {
+      log(`Failed to fetch custom field definitions: ${response.status}`, "sendgrid");
+      return null;
+    }
+
+    const data = await response.json();
+    const customFields = data.custom_fields || [];
+    const companyField = customFields.find(
+      (f: any) => f.name.toLowerCase() === "company"
+    );
+
+    if (companyField) {
+      cachedCompanyFieldId = companyField.id;
+      log(`Found custom field "Company" with ID: ${companyField.id}`, "sendgrid");
+      return companyField.id;
+    }
+
+    log(`No custom field named "Company" found. Available: ${customFields.map((f: any) => f.name).join(", ")}`, "sendgrid");
+    return null;
+  } catch (err: any) {
+    log(`Error fetching custom fields: ${err.message}`, "sendgrid");
+    return null;
+  }
+}
+
 const SENDGRID_BATCH_SIZE = 1000;
 
 export async function addContactsToList(
@@ -91,12 +131,24 @@ export async function addContactsToList(
   const apiKey = process.env.SENDGRID_API_KEY;
   if (!apiKey) throw new Error("SENDGRID_API_KEY is not configured.");
 
-  const sgContacts: SendGridContact[] = contacts.map((c) => ({
-    email: c.email,
-    first_name: c.firstName,
-    last_name: c.lastName,
-    ...(c.company && c.company !== "Unknown" ? { company: c.company } : {}),
-  }));
+  const companyFieldId = await getCompanyCustomFieldId();
+  log(`Using ${companyFieldId ? `custom field ${companyFieldId}` : "built-in company field"} for company`, "sendgrid");
+
+  const sgContacts: SendGridContact[] = contacts.map((c) => {
+    const contact: SendGridContact = {
+      email: c.email,
+      first_name: c.firstName,
+      last_name: c.lastName,
+    };
+    if (c.company && c.company !== "Unknown") {
+      if (companyFieldId) {
+        contact.custom_fields = { [companyFieldId]: c.company };
+      } else {
+        contact.company = c.company;
+      }
+    }
+    return contact;
+  });
 
   const jobIds: string[] = [];
 
