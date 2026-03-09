@@ -36,7 +36,7 @@ export default function Home() {
   const [alreadyInSendGrid, setAlreadyInSendGrid] = useState(0);
   const [syncLogId, setSyncLogId] = useState<string | null>(null);
   const [sendGridLists, setSendGridLists] = useState<SendGridList[]>([]);
-  const [selectedListId, setSelectedListId] = useState<string>("115297bb-7915-4671-bdcf-2d4037d6802a");
+  const [selectedListId, setSelectedListId] = useState<string>("");
   const [showCreateList, setShowCreateList] = useState(false);
   const [newListName, setNewListName] = useState("");
   const [creatingList, setCreatingList] = useState(false);

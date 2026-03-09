@@ -127,7 +127,8 @@ export async function registerRoutes(
       const newList = await createMarketingList(name.trim());
       res.json(newList);
     } catch (err: any) {
-      res.status(500).json({ message: err.message });
+      const status = err.message?.includes("400") || err.message?.includes("409") ? 400 : 500;
+      res.status(status).json({ message: err.message });
     }
   });
 
