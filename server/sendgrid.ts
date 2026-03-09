@@ -82,6 +82,8 @@ export async function getListContactEmails(listId: string): Promise<Set<string>>
   return emails;
 }
 
+const SENDGRID_BATCH_SIZE = 1000;
+
 export async function addContactsToList(
   listId: string,
   contacts: { email: string; firstName: string; lastName: string; company: string }[]
@@ -96,25 +98,38 @@ export async function addContactsToList(
     ...(c.company && c.company !== "Unknown" ? { company: c.company } : {}),
   }));
 
-  const response = await fetch("https://api.sendgrid.com/v3/marketing/contacts", {
-    method: "PUT",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      list_ids: [listId],
-      contacts: sgContacts,
-    }),
-  });
+  const jobIds: string[] = [];
 
-  if (!response.ok) {
-    const errorBody = await response.text();
-    log(`SendGrid API error: ${response.status} - ${errorBody}`, "sendgrid");
-    throw new Error(`SendGrid API error ${response.status}: ${errorBody}`);
+  for (let i = 0; i < sgContacts.length; i += SENDGRID_BATCH_SIZE) {
+    const batch = sgContacts.slice(i, i + SENDGRID_BATCH_SIZE);
+    const batchNum = Math.floor(i / SENDGRID_BATCH_SIZE) + 1;
+    const totalBatches = Math.ceil(sgContacts.length / SENDGRID_BATCH_SIZE);
+
+    log(`Uploading batch ${batchNum}/${totalBatches} (${batch.length} contacts)...`, "sendgrid");
+
+    const response = await fetch("https://api.sendgrid.com/v3/marketing/contacts", {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        list_ids: [listId],
+        contacts: batch,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      log(`SendGrid API error on batch ${batchNum}: ${response.status} - ${errorBody}`, "sendgrid");
+      throw new Error(`SendGrid API error ${response.status} on batch ${batchNum}: ${errorBody}`);
+    }
+
+    const data = await response.json();
+    jobIds.push(data.job_id);
+    log(`Batch ${batchNum} started. Job ID: ${data.job_id}`, "sendgrid");
   }
 
-  const data = await response.json();
-  log(`SendGrid batch upload started. Job ID: ${data.job_id}`, "sendgrid");
-  return { jobId: data.job_id };
+  log(`All ${jobIds.length} batches submitted successfully`, "sendgrid");
+  return { jobId: jobIds[jobIds.length - 1] };
 }
