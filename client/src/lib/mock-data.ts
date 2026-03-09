@@ -22,10 +22,11 @@ export type PullResult = {
   syncLogId: string;
   totalPulled: number;
   newContacts: number;
-  unsyncedCount: number;
+  alreadyInSendGrid: number;
+  contactsToSync: number;
   pulledContacts: { firstName: string; lastName: string; email: string; company: string }[];
   newContactDetails: Contact[];
-  unsyncedContacts: Contact[];
+  contactsToSyncDetails: { firstName: string; lastName: string; email: string; company: string }[];
 };
 
 export type SendGridList = {

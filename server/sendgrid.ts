@@ -32,6 +32,56 @@ export async function getMarketingLists(): Promise<{ id: string; name: string; c
   }));
 }
 
+export async function getListContactEmails(listId: string): Promise<Set<string>> {
+  const apiKey = process.env.SENDGRID_API_KEY;
+  if (!apiKey) throw new Error("SENDGRID_API_KEY is not configured.");
+
+  const emails = new Set<string>();
+  const query = `CONTAINS(list_ids, '${listId}')`;
+  let page = 1;
+  let hasMore = true;
+
+  log(`Fetching existing contacts from SendGrid list ${listId}...`, "sendgrid");
+
+  while (hasMore) {
+    const response = await fetch("https://api.sendgrid.com/v3/marketing/contacts/search", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ query }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      log(`SendGrid search error: ${response.status} - ${errorBody}`, "sendgrid");
+      if (response.status === 404) {
+        return emails;
+      }
+      throw new Error(`SendGrid search API error ${response.status}: ${errorBody}`);
+    }
+
+    const data = await response.json();
+    const results = data.result || [];
+
+    for (const contact of results) {
+      if (contact.email) {
+        emails.add(contact.email.toLowerCase().trim());
+      }
+    }
+
+    if (results.length < 50 || !data._metadata?.next) {
+      hasMore = false;
+    } else {
+      page++;
+    }
+  }
+
+  log(`Found ${emails.size} existing contacts in SendGrid list`, "sendgrid");
+  return emails;
+}
+
 export async function addContactsToList(
   listId: string,
   contacts: { email: string; firstName: string; lastName: string; company: string }[]

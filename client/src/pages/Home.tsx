@@ -11,6 +11,8 @@ import { Progress } from "@/components/ui/progress";
 
 type SyncStep = "idle" | "fetching" | "analyzing" | "ready" | "uploading" | "complete";
 
+type ContactToSync = { firstName: string; lastName: string; email: string; company: string };
+
 export default function Home() {
   const { toast } = useToast();
   const [step, setStep] = useState<SyncStep>("idle");
@@ -18,9 +20,9 @@ export default function Home() {
   const [sfReports, setSfReports] = useState<SalesforceReport[]>([]);
   const [selectedReportId, setSelectedReportId] = useState<string>("00OJw00000FMqtlMAD");
   const [loadingReports, setLoadingReports] = useState(false);
-  const [pulledContacts, setPulledContacts] = useState<{ firstName: string; lastName: string; email: string; company: string }[]>([]);
-  const [newContacts, setNewContacts] = useState<Contact[]>([]);
-  const [unsyncedContacts, setUnsyncedContacts] = useState<Contact[]>([]);
+  const [pulledContacts, setPulledContacts] = useState<ContactToSync[]>([]);
+  const [contactsToSync, setContactsToSync] = useState<ContactToSync[]>([]);
+  const [alreadyInSendGrid, setAlreadyInSendGrid] = useState(0);
   const [syncLogId, setSyncLogId] = useState<string | null>(null);
   const [sendGridLists, setSendGridLists] = useState<SendGridList[]>([]);
   const [selectedListId, setSelectedListId] = useState<string>("115297bb-7915-4671-bdcf-2d4037d6802a");
@@ -71,6 +73,9 @@ export default function Home() {
       if (selectedReportId && selectedReportId !== "__all__") {
         body.reportId = selectedReportId;
       }
+      if (selectedListId) {
+        body.listId = selectedListId;
+      }
 
       const res = await fetch("/api/salesforce/pull", {
         method: "POST",
@@ -90,16 +95,15 @@ export default function Home() {
 
       setTimeout(() => {
         setPulledContacts(data.pulledContacts);
-        setNewContacts(data.newContactDetails);
-        setUnsyncedContacts(data.unsyncedContacts || data.newContactDetails);
+        setContactsToSync(data.contactsToSyncDetails || []);
+        setAlreadyInSendGrid(data.alreadyInSendGrid || 0);
         setSyncLogId(data.syncLogId);
         setStep("ready");
         setProgress(100);
 
-        const unsyncedCount = data.unsyncedCount ?? data.newContacts;
         toast({
           title: "Analysis Complete",
-          description: `${data.totalPulled} pulled, ${data.newContacts} brand new, ${unsyncedCount} total ready to sync to SendGrid.`,
+          description: `${data.totalPulled} pulled from Salesforce. ${data.alreadyInSendGrid} already in SendGrid. ${data.contactsToSync} to push.`,
         });
       }, 800);
     } catch (err: any) {
@@ -128,7 +132,7 @@ export default function Home() {
       const res = await fetch("/api/sendgrid/push", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ listId: selectedListId, syncLogId }),
+        body: JSON.stringify({ listId: selectedListId, syncLogId, contacts: contactsToSync }),
       });
 
       if (!res.ok) {
@@ -163,24 +167,11 @@ export default function Home() {
   const reset = () => {
     setStep("idle");
     setPulledContacts([]);
-    setNewContacts([]);
-    setUnsyncedContacts([]);
+    setContactsToSync([]);
+    setAlreadyInSendGrid(0);
     setSyncLogId(null);
     setProgress(0);
     setError(null);
-  };
-
-  const handleResetSync = async () => {
-    try {
-      const res = await fetch("/api/contacts/reset-sync", { method: "POST" });
-      const data = await res.json();
-      toast({
-        title: "Sync Flags Reset",
-        description: `${data.resetCount} contacts marked as unsynced and ready to push again.`,
-      });
-    } catch (err: any) {
-      toast({ title: "Error", description: err.message, variant: "destructive" });
-    }
   };
 
   const sfConfigured = configStatus?.salesforce ?? false;
@@ -189,6 +180,8 @@ export default function Home() {
   const selectedReportName = selectedReportId === "__all__"
     ? "All Contacts"
     : sfReports.find((r) => r.id === selectedReportId)?.name || "Selected Report";
+
+  const selectedListName = sendGridLists.find((l) => l.id === selectedListId)?.name || "Selected List";
 
   return (
     <div className="min-h-screen bg-neutral-50/50 p-6 md:p-12">
@@ -200,16 +193,12 @@ export default function Home() {
             <p className="text-neutral-500 mt-1">Salesforce to SendGrid Marketing Campaign Pipeline</p>
           </div>
           <div className="flex items-center gap-3">
-            <Button variant="outline" size="sm" onClick={handleResetSync} disabled={step !== "idle"} data-testid="button-reset-sync">
-              Reset Sync Flags
-            </Button>
             <Button variant="outline" size="sm" onClick={reset} disabled={step === "idle"} data-testid="button-reset">
               Reset Workflow
             </Button>
           </div>
         </header>
 
-        {/* Connection Status */}
         {configStatus && (!sfConfigured || !sgConfigured) && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
@@ -233,12 +222,10 @@ export default function Home() {
           </div>
         )}
 
-        {/* Workflow Pipeline */}
         <div className="bg-white border rounded-xl p-6 shadow-sm">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6 relative">
             <div className="hidden md:block absolute top-1/2 left-0 w-full h-0.5 bg-neutral-100 -z-10 -translate-y-1/2" />
 
-            {/* Step 1: Salesforce */}
             <div className="flex flex-col items-center gap-3 bg-white p-2">
               <div className={`w-12 h-12 rounded-full flex items-center justify-center border-2 transition-colors
                 ${step !== "idle" ? "border-blue-600 bg-blue-50 text-blue-600" : "border-neutral-200 bg-neutral-50 text-neutral-400"}`}>
@@ -249,7 +236,6 @@ export default function Home() {
                 <p className="text-xs text-neutral-500">Salesforce API</p>
               </div>
 
-              {/* Report Selector */}
               {sfConfigured && step === "idle" && (
                 <div className="w-52">
                   <Select value={selectedReportId} onValueChange={setSelectedReportId} disabled={loadingReports}>
@@ -287,7 +273,6 @@ export default function Home() {
 
             <ArrowRight className="w-5 h-5 text-neutral-300 hidden md:block" />
 
-            {/* Step 2: Analyze */}
             <div className="flex flex-col items-center gap-3 bg-white p-2">
               <div className={`w-12 h-12 rounded-full flex items-center justify-center border-2 transition-colors
                 ${["ready", "uploading", "complete"].includes(step) ? "border-amber-500 bg-amber-50 text-amber-600"
@@ -296,18 +281,24 @@ export default function Home() {
                 <UserPlus className="w-5 h-5" />
               </div>
               <div className="text-center">
-                <p className="font-medium text-sm">2. Filter New</p>
-                <p className="text-xs text-neutral-500">Deduplicate</p>
+                <p className="font-medium text-sm">2. Compare</p>
+                <p className="text-xs text-neutral-500">vs. SendGrid List</p>
               </div>
               <div className="h-9 flex items-center">
-                {step === "analyzing" && <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 animate-pulse">Analyzing...</Badge>}
-                {["ready", "uploading", "complete"].includes(step) && <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">{unsyncedContacts.length} to Sync</Badge>}
+                {step === "analyzing" && <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 animate-pulse">Comparing...</Badge>}
+                {["ready", "uploading", "complete"].includes(step) && (
+                  <div className="flex flex-col items-center gap-1">
+                    <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">{contactsToSync.length} to Push</Badge>
+                    {alreadyInSendGrid > 0 && (
+                      <span className="text-[10px] text-neutral-400">{alreadyInSendGrid} already in list</span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
             <ArrowRight className="w-5 h-5 text-neutral-300 hidden md:block" />
 
-            {/* Step 3: SendGrid */}
             <div className="flex flex-col items-center gap-3 bg-white p-2">
               <div className={`w-12 h-12 rounded-full flex items-center justify-center border-2 transition-colors
                 ${step === "complete" ? "border-green-600 bg-green-50 text-green-600"
@@ -320,7 +311,7 @@ export default function Home() {
                 <p className="text-xs text-neutral-500">SendGrid API</p>
               </div>
               <div className="flex flex-col items-center gap-2">
-                {sgConfigured && sendGridLists.length > 0 && step === "ready" && (
+                {sgConfigured && sendGridLists.length > 0 && step === "idle" && (
                   <Select value={selectedListId} onValueChange={setSelectedListId}>
                     <SelectTrigger className="w-44 h-8 text-xs" data-testid="select-sendgrid-list">
                       <SelectValue placeholder="Select list" />
@@ -334,9 +325,14 @@ export default function Home() {
                     </SelectContent>
                   </Select>
                 )}
+                {step !== "idle" && (
+                  <div className="text-xs text-neutral-500 bg-neutral-50 px-2 py-1 rounded">
+                    {selectedListName}
+                  </div>
+                )}
                 <Button
                   onClick={handleUploadToSendGrid}
-                  disabled={step !== "ready" || !sgConfigured}
+                  disabled={step !== "ready" || !sgConfigured || contactsToSync.length === 0}
                   className={`w-32 ${step === "complete" ? "bg-green-600 hover:bg-green-700" : ""}`}
                   data-testid="button-upload-sendgrid"
                 >
@@ -351,7 +347,7 @@ export default function Home() {
           {(step === "fetching" || step === "uploading") && (
             <div className="mt-8">
               <div className="flex justify-between text-xs text-neutral-500 mb-2">
-                <span>{step === "fetching" ? "Connecting to Salesforce..." : "Batch uploading to SendGrid..."}</span>
+                <span>{step === "fetching" ? "Pulling from Salesforce and checking SendGrid list..." : "Batch uploading to SendGrid..."}</span>
                 <span>{progress}%</span>
               </div>
               <Progress value={progress} className="h-2" />
@@ -359,11 +355,9 @@ export default function Home() {
           )}
         </div>
 
-        {/* Data Tables */}
         {step !== "idle" && step !== "fetching" && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
 
-            {/* Raw Report */}
             <Card>
               <CardHeader className="pb-4">
                 <div className="flex justify-between items-center">
@@ -389,18 +383,18 @@ export default function Home() {
                         <TableRow>
                           <TableCell colSpan={3} className="h-32 text-center text-neutral-500">
                             <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-neutral-400" />
-                            Analyzing contacts...
+                            Pulling contacts...
                           </TableCell>
                         </TableRow>
                       ) : (
                         pulledContacts.map((contact, idx) => {
-                          const isNew = newContacts.some(nc => nc.email === contact.email);
+                          const needsSync = contactsToSync.some(c => c.email === contact.email);
                           return (
                             <TableRow key={`sf-${idx}`}>
                               <TableCell className="font-medium">
                                 <div className="flex items-center gap-2">
                                   {contact.firstName} {contact.lastName}
-                                  {isNew && <Badge className="text-[10px] h-4 px-1 bg-amber-100 text-amber-800 hover:bg-amber-100 shadow-none border-none">NEW</Badge>}
+                                  {needsSync && <Badge className="text-[10px] h-4 px-1 bg-amber-100 text-amber-800 hover:bg-amber-100 shadow-none border-none">NEW</Badge>}
                                 </div>
                               </TableCell>
                               <TableCell className="text-neutral-500">{contact.email}</TableCell>
@@ -415,18 +409,15 @@ export default function Home() {
               </CardContent>
             </Card>
 
-            {/* Contacts to Sync */}
             <Card className={step === "analyzing" ? "opacity-50 pointer-events-none transition-opacity" : "transition-opacity"}>
               <CardHeader className="pb-4">
                 <div className="flex justify-between items-center">
                   <div>
-                    <CardTitle className="text-lg text-amber-700">Contacts to Push to SendGrid</CardTitle>
-                    <CardDescription>
-                      {newContacts.length} brand new + {unsyncedContacts.length - newContacts.length > 0 ? `${unsyncedContacts.length - newContacts.length} previously unsynced` : "0 previously unsynced"}
-                    </CardDescription>
+                    <CardTitle className="text-lg text-amber-700">Contacts to Push</CardTitle>
+                    <CardDescription>Not yet in "{selectedListName}"</CardDescription>
                   </div>
                   <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100 border-none shadow-none" data-testid="badge-new-count">
-                    {unsyncedContacts.length} to Sync
+                    {contactsToSync.length} to Sync
                   </Badge>
                 </div>
               </CardHeader>
@@ -441,42 +432,34 @@ export default function Home() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {unsyncedContacts.length === 0 ? (
+                      {contactsToSync.length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={3} className="h-32 text-center text-amber-700/50">
-                            All contacts are already synced. Use "Reset Sync Flags" to re-push.
+                            All contacts are already in the SendGrid list.
                           </TableCell>
                         </TableRow>
                       ) : (
-                        unsyncedContacts.map((contact) => {
-                          const isNew = newContacts.some(nc => nc.email === contact.email);
-                          return (
-                            <TableRow key={`sync-${contact.id}`} className="border-amber-100/50 hover:bg-amber-50/50">
-                              <TableCell className="font-medium text-amber-950">
-                                <div className="flex items-center gap-2">
-                                  {contact.firstName} {contact.lastName}
-                                  {isNew && <Badge className="text-[10px] h-4 px-1 bg-amber-100 text-amber-800 hover:bg-amber-100 shadow-none border-none">NEW</Badge>}
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-amber-700/80">{contact.email}</TableCell>
-                              <TableCell>
-                                {step === "complete" ? (
-                                  <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-                                    <CheckCircle2 className="w-3 h-3 mr-1" /> Synced
-                                  </Badge>
-                                ) : step === "uploading" ? (
-                                  <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
-                                    <Loader2 className="w-3 h-3 mr-1 animate-spin" /> Syncing
-                                  </Badge>
-                                ) : (
-                                  <Badge variant="outline" className="bg-white text-amber-700 border-amber-200">
-                                    Pending
-                                  </Badge>
-                                )}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })
+                        contactsToSync.map((contact, idx) => (
+                          <TableRow key={`sync-${idx}`} className="border-amber-100/50 hover:bg-amber-50/50">
+                            <TableCell className="font-medium text-amber-950">{contact.firstName} {contact.lastName}</TableCell>
+                            <TableCell className="text-amber-700/80">{contact.email}</TableCell>
+                            <TableCell>
+                              {step === "complete" ? (
+                                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                                  <CheckCircle2 className="w-3 h-3 mr-1" /> Synced
+                                </Badge>
+                              ) : step === "uploading" ? (
+                                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                                  <Loader2 className="w-3 h-3 mr-1 animate-spin" /> Syncing
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="bg-white text-amber-700 border-amber-200">
+                                  Pending
+                                </Badge>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))
                       )}
                     </TableBody>
                   </Table>

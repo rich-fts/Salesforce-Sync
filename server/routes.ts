@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { fetchSalesforceReport, isSalesforceConnected, listSalesforceReports } from "./salesforce";
-import { addContactsToList, getMarketingLists } from "./sendgrid";
+import { addContactsToList, getMarketingLists, getListContactEmails } from "./sendgrid";
 import type { InsertContact } from "@shared/schema";
 
 export async function registerRoutes(
@@ -30,7 +30,7 @@ export async function registerRoutes(
 
   app.post("/api/salesforce/pull", async (req, res) => {
     try {
-      const { reportId } = req.body || {};
+      const { reportId, listId } = req.body || {};
       const sfContacts = await fetchSalesforceReport(reportId || undefined);
 
       const existingContacts = await storage.getAllContacts();
@@ -49,7 +49,17 @@ export async function registerRoutes(
 
       const savedNew = await storage.createContacts(newContactsData);
 
-      const allUnsynced = await storage.getUnsyncedContacts();
+      let sendgridEmails = new Set<string>();
+      if (listId) {
+        sendgridEmails = await getListContactEmails(listId);
+      }
+
+      const contactsToSync = sfContacts.filter((c) => !sendgridEmails.has(c.email));
+
+      await storage.syncFlagsFromSendGrid(
+        sfContacts.map(c => c.email),
+        sendgridEmails
+      );
 
       const syncLog = await storage.createSyncLog({
         totalPulled: sfContacts.length,
@@ -62,10 +72,11 @@ export async function registerRoutes(
         syncLogId: syncLog.id,
         totalPulled: sfContacts.length,
         newContacts: savedNew.length,
-        unsyncedCount: allUnsynced.length,
+        alreadyInSendGrid: sendgridEmails.size,
+        contactsToSync: contactsToSync.length,
         pulledContacts: sfContacts,
         newContactDetails: savedNew,
-        unsyncedContacts: allUnsynced,
+        contactsToSyncDetails: contactsToSync,
       });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -83,47 +94,35 @@ export async function registerRoutes(
 
   app.post("/api/sendgrid/push", async (req, res) => {
     try {
-      const { listId, syncLogId } = req.body;
+      const { listId, syncLogId, contacts: contactsToPush } = req.body;
       if (!listId) {
         return res.status(400).json({ message: "listId is required" });
       }
 
-      const unsyncedContacts = await storage.getUnsyncedContacts();
-
-      if (unsyncedContacts.length === 0) {
-        return res.json({ message: "No new contacts to sync", synced: 0 });
+      if (!contactsToPush || contactsToPush.length === 0) {
+        return res.json({ message: "No contacts to sync", synced: 0 });
       }
 
       if (syncLogId) {
         await storage.updateSyncLogStatus(syncLogId, "uploading");
       }
 
-      const result = await addContactsToList(listId, unsyncedContacts);
+      const result = await addContactsToList(listId, contactsToPush);
 
-      await storage.markContactsSynced(unsyncedContacts.map((c) => c.email));
+      await storage.markContactsSynced(contactsToPush.map((c: any) => c.email));
 
       if (syncLogId) {
-        await storage.updateSyncLogStatus(syncLogId, "complete", unsyncedContacts.length);
+        await storage.updateSyncLogStatus(syncLogId, "complete", contactsToPush.length);
       }
 
       res.json({
         jobId: result.jobId,
-        synced: unsyncedContacts.length,
-        contacts: unsyncedContacts,
+        synced: contactsToPush.length,
       });
     } catch (err: any) {
       if (req.body?.syncLogId) {
         await storage.updateSyncLogStatus(req.body.syncLogId, "failed").catch(() => {});
       }
-      res.status(500).json({ message: err.message });
-    }
-  });
-
-  app.post("/api/contacts/reset-sync", async (_req, res) => {
-    try {
-      const resetCount = await storage.resetSyncFlags();
-      res.json({ message: `Reset ${resetCount} contacts to unsynced`, resetCount });
-    } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
   });
