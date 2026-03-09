@@ -53,7 +53,7 @@ export async function registerRoutes(
         sendgridEmails = await getListContactEmails(listId, allEmails);
       }
 
-      const contactsToSync = sfContacts.filter((c) => !sendgridEmails.has(c.email));
+      const contactsToSync = sfContacts.filter((c) => !sendgridEmails.has(c.email.toLowerCase()));
 
       await storage.syncFlagsFromSendGrid(
         sfContacts.map(c => c.email),
@@ -224,7 +224,7 @@ export async function registerRoutes(
         sendgridEmails = await getListContactEmails(listId, allEmails);
       }
 
-      const contactsToSync = mcContacts.filter((c) => !sendgridEmails.has(c.email));
+      const contactsToSync = mcContacts.filter((c) => !sendgridEmails.has(c.email.toLowerCase()));
 
       await storage.syncFlagsFromSendGrid(
         mcContacts.map((c) => c.email),

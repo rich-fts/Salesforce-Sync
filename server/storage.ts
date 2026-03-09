@@ -60,7 +60,7 @@ export class DatabaseStorage implements IStorage {
 
   async syncFlagsFromSendGrid(allEmails: string[], sendgridEmails: Set<string>): Promise<void> {
     for (const email of allEmails) {
-      const inSendGrid = sendgridEmails.has(email);
+      const inSendGrid = sendgridEmails.has(email.toLowerCase());
       await db.update(contacts).set({ syncedToSendgrid: inSendGrid }).where(eq(contacts.email, email));
     }
   }
