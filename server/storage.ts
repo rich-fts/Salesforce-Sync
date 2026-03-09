@@ -1,38 +1,67 @@
-import { type User, type InsertUser } from "@shared/schema";
-import { randomUUID } from "crypto";
-
-// modify the interface with any CRUD methods
-// you might need
+import { eq, desc } from "drizzle-orm";
+import { db } from "./db";
+import { contacts, syncLogs, type Contact, type InsertContact, type SyncLog, type InsertSyncLog } from "@shared/schema";
 
 export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+  getAllContacts(): Promise<Contact[]>;
+  getContactByEmail(email: string): Promise<Contact | undefined>;
+  createContact(contact: InsertContact): Promise<Contact>;
+  createContacts(contactList: InsertContact[]): Promise<Contact[]>;
+  markContactsSynced(emails: string[]): Promise<void>;
+  getUnsyncedContacts(): Promise<Contact[]>;
+  createSyncLog(log: InsertSyncLog): Promise<SyncLog>;
+  updateSyncLogStatus(id: string, status: string, syncedCount?: number): Promise<SyncLog | undefined>;
+  getSyncLogs(): Promise<SyncLog[]>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User>;
-
-  constructor() {
-    this.users = new Map();
+export class DatabaseStorage implements IStorage {
+  async getAllContacts(): Promise<Contact[]> {
+    return db.select().from(contacts).orderBy(desc(contacts.createdAt));
   }
 
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+  async getContactByEmail(email: string): Promise<Contact | undefined> {
+    const [contact] = await db.select().from(contacts).where(eq(contacts.email, email));
+    return contact;
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+  async createContact(contact: InsertContact): Promise<Contact> {
+    const [created] = await db.insert(contacts).values(contact).returning();
+    return created;
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
+  async createContacts(contactList: InsertContact[]): Promise<Contact[]> {
+    if (contactList.length === 0) return [];
+    const created = await db.insert(contacts).values(contactList).onConflictDoNothing({ target: contacts.email }).returning();
+    return created;
+  }
+
+  async markContactsSynced(emails: string[]): Promise<void> {
+    for (const email of emails) {
+      await db.update(contacts).set({ syncedToSendgrid: true }).where(eq(contacts.email, email));
+    }
+  }
+
+  async getUnsyncedContacts(): Promise<Contact[]> {
+    return db.select().from(contacts).where(eq(contacts.syncedToSendgrid, false));
+  }
+
+  async createSyncLog(log: InsertSyncLog): Promise<SyncLog> {
+    const [created] = await db.insert(syncLogs).values(log).returning();
+    return created;
+  }
+
+  async updateSyncLogStatus(id: string, status: string, syncedCount?: number): Promise<SyncLog | undefined> {
+    const updates: Partial<SyncLog> = { status };
+    if (syncedCount !== undefined) {
+      updates.syncedToSendgrid = syncedCount;
+    }
+    const [updated] = await db.update(syncLogs).set(updates).where(eq(syncLogs.id, id)).returning();
+    return updated;
+  }
+
+  async getSyncLogs(): Promise<SyncLog[]> {
+    return db.select().from(syncLogs).orderBy(desc(syncLogs.createdAt));
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
