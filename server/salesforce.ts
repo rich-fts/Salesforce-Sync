@@ -126,51 +126,113 @@ async function fetchAllContacts(conn: jsforce.Connection): Promise<SalesforceCon
   return parseContactRecords(allRecords);
 }
 
-const COLUMN_TO_SOQL: Record<string, string> = {
-  "contact.first_name": "FirstName",
-  "contact.last_name": "LastName",
-  "contact.email": "Email",
-  "contact.name": "Name",
-  "contact.title": "Title",
-  "contact.phone": "Phone",
-  "contact.mobilephone": "MobilePhone",
-  "contact.mailingcity": "MailingCity",
-  "contact.mailingstate": "MailingState",
-  "contact.mailingcountry": "MailingCountry",
-  "contact.department": "Department",
-  "contact.created_date": "CreatedDate",
-  "contact.lastmodifieddate": "LastModifiedDate",
-  "contact.owner": "Owner.Name",
-  "account.name": "Account.Name",
-  "account_name": "Account.Name",
-  "first_name": "FirstName",
-  "last_name": "LastName",
-  "email": "Email",
-  "name": "Name",
-  "title": "Title",
-  "phone": "Phone",
-  "FK_ACC_NAME": "Account.Name",
-  "fk_acc_name": "Account.Name",
+type ReportTypeConfig = {
+  soqlObject: string;
+  contactPrefix: string;
+  columnMap: Record<string, string>;
+  filterMap: Record<string, string>;
 };
 
-function reportFilterToSOQL(filter: any): string | null {
+const CAMPAIGN_CONTACT_CONFIG: ReportTypeConfig = {
+  soqlObject: "CampaignMember",
+  contactPrefix: "Contact.",
+  columnMap: {
+    "first_name": "Contact.FirstName",
+    "last_name": "Contact.LastName",
+    "email": "Contact.Email",
+    "account.name": "Contact.Account.Name",
+    "name": "Contact.Name",
+    "title": "Contact.Title",
+    "phone": "Contact.Phone",
+    "fk_acc_name": "Contact.Account.Name",
+  },
+  filterMap: {
+    "campaign_name": "Campaign.Name",
+    "campaign.name": "Campaign.Name",
+    "email_opt_out": "Contact.HasOptedOutOfEmail",
+    "hasoptedoutofemail": "Contact.HasOptedOutOfEmail",
+    "email": "Contact.Email",
+    "first_name": "Contact.FirstName",
+    "last_name": "Contact.LastName",
+    "account.name": "Contact.Account.Name",
+    "fk_acc_name": "Contact.Account.Name",
+  },
+};
+
+const CONTACT_CONFIG: ReportTypeConfig = {
+  soqlObject: "Contact",
+  contactPrefix: "",
+  columnMap: {
+    "first_name": "FirstName",
+    "last_name": "LastName",
+    "email": "Email",
+    "account.name": "Account.Name",
+    "name": "Name",
+    "title": "Title",
+    "phone": "Phone",
+    "mobilephone": "MobilePhone",
+    "mailingcity": "MailingCity",
+    "mailingstate": "MailingState",
+    "mailingcountry": "MailingCountry",
+    "department": "Department",
+    "fk_acc_name": "Account.Name",
+    "contact.first_name": "FirstName",
+    "contact.last_name": "LastName",
+    "contact.email": "Email",
+    "contact.name": "Name",
+    "contact.title": "Title",
+    "contact.phone": "Phone",
+  },
+  filterMap: {
+    "first_name": "FirstName",
+    "last_name": "LastName",
+    "email": "Email",
+    "email_opt_out": "HasOptedOutOfEmail",
+    "hasoptedoutofemail": "HasOptedOutOfEmail",
+    "account.name": "Account.Name",
+    "fk_acc_name": "Account.Name",
+    "contact.first_name": "FirstName",
+    "contact.last_name": "LastName",
+    "contact.email": "Email",
+  },
+};
+
+function getReportTypeConfig(reportType: string): ReportTypeConfig {
+  const rt = reportType.toLowerCase();
+  if (rt.includes("campaigncontact") || rt.includes("campaignmember") || rt.includes("campaign")) {
+    return CAMPAIGN_CONTACT_CONFIG;
+  }
+  return CONTACT_CONFIG;
+}
+
+function resolveFilterField(filter: any, config: ReportTypeConfig): string | null {
   const col = filter.column;
-  const op = filter.operator;
-  const val = filter.value;
+  if (!col) return null;
 
-  const soqlField = COLUMN_TO_SOQL[col?.toLowerCase()] || col;
-  if (!soqlField) return null;
+  const colLower = col.toLowerCase();
+  if (config.filterMap[colLower]) return config.filterMap[colLower];
 
+  if (col.includes(".") || col.includes("__c")) {
+    if (config.soqlObject === "CampaignMember" && !col.startsWith("Contact.") && !col.startsWith("Campaign.")) {
+      return `Contact.${col}`;
+    }
+    return col;
+  }
+
+  return null;
+}
+
+function buildFilterClause(field: string, op: string, val: string): string | null {
   switch (op) {
-    case "equals": return `${soqlField} = '${escapeSOQL(val)}'`;
-    case "notEqual": return `${soqlField} != '${escapeSOQL(val)}'`;
-    case "contains": return `${soqlField} LIKE '%${escapeSOQL(val)}%'`;
-    case "notContain": return `(NOT ${soqlField} LIKE '%${escapeSOQL(val)}%')`;
-    case "startsWith": return `${soqlField} LIKE '${escapeSOQL(val)}%'`;
-    case "greaterThan": return `${soqlField} > '${escapeSOQL(val)}'`;
-    case "lessThan": return `${soqlField} < '${escapeSOQL(val)}'`;
-    case "greaterOrEqual": return `${soqlField} >= '${escapeSOQL(val)}'`;
-    case "lessOrEqual": return `${soqlField} <= '${escapeSOQL(val)}'`;
+    case "equals": return `${field} = '${escapeSOQL(val)}'`;
+    case "notEqual": return `${field} != '${escapeSOQL(val)}'`;
+    case "contains": return `${field} LIKE '%${escapeSOQL(val)}%'`;
+    case "notContain": return `(NOT ${field} LIKE '%${escapeSOQL(val)}%')`;
+    case "startsWith": return `${field} LIKE '${escapeSOQL(val)}%'`;
+    case "greaterThan": return `${field} > '${escapeSOQL(val)}'`;
+    case "lessThan": return `${field} < '${escapeSOQL(val)}'`;
+    case "greaterOrEqual": return `${field} >= '${escapeSOQL(val)}'`;
+    case "lessOrEqual": return `${field} <= '${escapeSOQL(val)}'`;
     default: return null;
   }
 }
@@ -210,20 +272,35 @@ async function fetchReportById(conn: jsforce.Connection, reportId: string): Prom
   log(`Report type: ${reportType}, columns: ${detailColumns.join(", ")}`, "salesforce");
   log(`Filters: ${JSON.stringify(reportFilters)}`, "salesforce");
 
+  const config = getReportTypeConfig(reportType);
+  log(`Using config for object: ${config.soqlObject}`, "salesforce");
+
+  const emailField = config.contactPrefix + "Email";
+  const firstNameField = config.contactPrefix + "FirstName";
+  const lastNameField = config.contactPrefix + "LastName";
+  const accountField = config.contactPrefix + "Account.Name";
+
   const selectFields = new Set<string>();
-  selectFields.add("FirstName");
-  selectFields.add("LastName");
-  selectFields.add("Email");
-  selectFields.add("Account.Name");
+  selectFields.add(firstNameField);
+  selectFields.add(lastNameField);
+  selectFields.add(emailField);
+  selectFields.add(accountField);
 
   for (const col of detailColumns) {
-    const mapped = COLUMN_TO_SOQL[col.toLowerCase()] || COLUMN_TO_SOQL[col];
+    const mapped = config.columnMap[col.toLowerCase()];
     if (mapped) selectFields.add(mapped);
   }
 
-  const whereClauses: string[] = ["Email != null"];
+  const whereClauses: string[] = [`${emailField} != null`];
 
-  const filterClauses: (string | null)[] = reportFilters.map((f: any) => reportFilterToSOQL(f));
+  const filterClauses: (string | null)[] = reportFilters.map((f: any) => {
+    const field = resolveFilterField(f, config);
+    if (!field) {
+      log(`Skipping unmapped filter column: ${f.column}`, "salesforce");
+      return null;
+    }
+    return buildFilterClause(field, f.operator, f.value);
+  });
   const validFilterClauses = filterClauses.filter((c): c is string => c !== null);
 
   if (validFilterClauses.length > 0) {
@@ -238,7 +315,7 @@ async function fetchReportById(conn: jsforce.Connection, reportId: string): Prom
     }
   }
 
-  const soql = `SELECT ${Array.from(selectFields).join(", ")} FROM Contact WHERE ${whereClauses.join(" AND ")} ORDER BY CreatedDate DESC`;
+  const soql = `SELECT ${Array.from(selectFields).join(", ")} FROM ${config.soqlObject} WHERE ${whereClauses.join(" AND ")} ORDER BY CreatedDate DESC`;
   log(`Generated SOQL: ${soql}`, "salesforce");
 
   const allRecords: any[] = [];
@@ -252,7 +329,22 @@ async function fetchReportById(conn: jsforce.Connection, reportId: string): Prom
   }
 
   log(`Total records from report query: ${allRecords.length}`, "salesforce");
+
+  if (config.soqlObject === "CampaignMember") {
+    return parseCampaignMemberRecords(allRecords);
+  }
   return parseContactRecords(allRecords);
+}
+
+function parseCampaignMemberRecords(records: any[]): SalesforceContact[] {
+  return records
+    .filter((r: any) => r.Contact?.Email)
+    .map((record: any) => ({
+      firstName: record.Contact?.FirstName || "",
+      lastName: record.Contact?.LastName || "",
+      email: (record.Contact.Email as string).toLowerCase().trim(),
+      company: record.Contact?.Account?.Name || "Unknown",
+    }));
 }
 
 function parseContactRecords(records: any[]): SalesforceContact[] {
