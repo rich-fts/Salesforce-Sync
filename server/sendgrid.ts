@@ -4,6 +4,7 @@ type SendGridContact = {
   email: string;
   first_name: string;
   last_name: string;
+  company?: string;
   custom_fields?: Record<string, string>;
 };
 
@@ -42,7 +43,7 @@ export async function addContactsToList(
     email: c.email,
     first_name: c.firstName,
     last_name: c.lastName,
-    custom_fields: {},
+    ...(c.company && c.company !== "Unknown" ? { company: c.company } : {}),
   }));
 
   const response = await fetch("https://api.sendgrid.com/v3/marketing/contacts", {
