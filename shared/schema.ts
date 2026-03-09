@@ -20,6 +20,7 @@ export const syncLogs = pgTable("sync_logs", {
   newContacts: integer("new_contacts").notNull(),
   syncedToSendgrid: integer("synced_to_sendgrid").notNull().default(0),
   status: text("status").notNull().default("pending"),
+  destinationListId: text("destination_list_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

@@ -65,6 +65,7 @@ export async function registerRoutes(
         newContacts: savedNew.length,
         syncedToSendgrid: 0,
         status: "pulled",
+        destinationListId: listId || null,
       });
 
       res.json({
@@ -87,10 +88,15 @@ export async function registerRoutes(
       const unsynced = await storage.getUnsyncedContacts();
       const all = await storage.getAllContacts();
       const syncedCount = all.length - unsynced.length;
+
+      const logs = await storage.getSyncLogs();
+      const latestLog = logs.length > 0 ? logs[0] : null;
+
       res.json({
         total: all.length,
         unsynced: unsynced.length,
         synced: syncedCount,
+        destinationListId: latestLog?.destinationListId || null,
         contacts: unsynced.map((c) => ({
           firstName: c.firstName,
           lastName: c.lastName,
@@ -216,6 +222,7 @@ export async function registerRoutes(
         newContacts: savedNew.length,
         syncedToSendgrid: 0,
         status: "pulled",
+        destinationListId: listId || null,
       });
 
       res.json({

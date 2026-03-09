@@ -99,6 +99,9 @@ export default function Home() {
             setContactsToSync(data.contacts);
             setAlreadyInSendGrid(data.synced);
             setPulledContacts(data.contacts);
+            if (data.destinationListId) {
+              setSelectedListId(data.destinationListId);
+            }
             setStep("ready");
             setProgress(100);
             toast({
@@ -334,8 +337,8 @@ export default function Home() {
                 <CloudDownload className="w-5 h-5" />
               </div>
               <div className="text-center">
-                <p className="font-medium text-sm">1. Pull Contacts</p>
-                <p className="text-xs text-neutral-500">{(fetchedSource || dataSource) === "mailchimp" ? "Mailchimp" : "Salesforce"} API</p>
+                <p className="font-medium text-sm">1. Configure & Pull</p>
+                <p className="text-xs text-neutral-500">Source → Destination</p>
               </div>
 
               {(step === "idle" || ((step === "complete" || step === "ready") && contactsToSync.length === 0)) && (sfConfigured || mcConfigured) && (
@@ -446,9 +449,33 @@ export default function Home() {
                 </div>
               )}
 
+              {sgConfigured && sendGridLists.length > 0 && (step === "idle" || ((step === "complete" || step === "ready") && contactsToSync.length === 0)) && (
+                <div className="w-52">
+                  <div className="text-[10px] text-neutral-400 mb-1 text-center">Destination SendGrid List</div>
+                  <Select value={selectedListId} onValueChange={setSelectedListId}>
+                    <SelectTrigger className="h-8 text-xs" data-testid="select-sendgrid-list">
+                      <Send className="w-3 h-3 mr-1.5 shrink-0 text-neutral-400" />
+                      <SelectValue placeholder="Select list" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-60 overflow-y-auto">
+                      {sendGridLists.map((list) => (
+                        <SelectItem key={list.id} value={list.id}>
+                          {list.name} ({list.contact_count})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              {step !== "idle" && !((step === "complete" || step === "ready") && contactsToSync.length === 0) && (
+                <div className="text-[10px] text-neutral-400 text-center">
+                  → {selectedListName}
+                </div>
+              )}
+
               <Button
                 onClick={handleFetchReport}
-                disabled={!(step === "idle" || (step === "complete" && contactsToSync.length === 0) || (step === "ready" && contactsToSync.length === 0)) || !sourceConfigured || (dataSource === "mailchimp" && (!selectedAudienceId || loadingAudiences))}
+                disabled={!(step === "idle" || (step === "complete" && contactsToSync.length === 0) || (step === "ready" && contactsToSync.length === 0)) || !sourceConfigured || (dataSource === "mailchimp" && (!selectedAudienceId || loadingAudiences)) || !selectedListId}
                 className="w-32"
                 data-testid="button-fetch-report"
               >
@@ -510,22 +537,8 @@ export default function Home() {
                 <p className="text-xs text-neutral-500">SendGrid API</p>
               </div>
               <div className="flex flex-col items-center gap-2">
-                {sgConfigured && sendGridLists.length > 0 && (step === "idle" || ((step === "complete" || step === "ready") && contactsToSync.length === 0)) && (
-                  <Select value={selectedListId} onValueChange={setSelectedListId}>
-                    <SelectTrigger className="w-44 h-8 text-xs" data-testid="select-sendgrid-list">
-                      <SelectValue placeholder="Select list" />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-60 overflow-y-auto">
-                      {sendGridLists.map((list) => (
-                        <SelectItem key={list.id} value={list.id}>
-                          {list.name} ({list.contact_count})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-                {step !== "idle" && !((step === "complete" || step === "ready") && contactsToSync.length === 0) && (
-                  <div className="text-xs text-neutral-500 bg-neutral-50 px-2 py-1 rounded">
+                {step !== "idle" && (
+                  <div className="text-xs text-neutral-500 bg-neutral-50 px-2 py-1 rounded max-w-[11rem] truncate">
                     {selectedListName}
                   </div>
                 )}
@@ -556,7 +569,7 @@ export default function Home() {
           {(step === "fetching" || step === "uploading") && (
             <div className="mt-8">
               <div className="flex justify-between text-xs text-neutral-500 mb-2">
-                <span>{step === "fetching" ? "Pulling from Salesforce and checking SendGrid list..." : "Batch uploading to SendGrid..."}</span>
+                <span>{step === "fetching" ? `Pulling from ${(fetchedSource || dataSource) === "mailchimp" ? "Mailchimp" : "Salesforce"} and checking SendGrid list...` : `Batch uploading to ${selectedListName}...`}</span>
                 <span>{progress}%</span>
               </div>
               <Progress value={progress} className="h-2" />
