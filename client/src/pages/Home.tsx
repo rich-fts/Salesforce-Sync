@@ -16,7 +16,7 @@ export default function Home() {
   const [step, setStep] = useState<SyncStep>("idle");
   const [configStatus, setConfigStatus] = useState<ConfigStatus | null>(null);
   const [sfReports, setSfReports] = useState<SalesforceReport[]>([]);
-  const [selectedReportId, setSelectedReportId] = useState<string>("__all__");
+  const [selectedReportId, setSelectedReportId] = useState<string>("00OJw00000FMqtlMAD");
   const [loadingReports, setLoadingReports] = useState(false);
   const [pulledContacts, setPulledContacts] = useState<{ firstName: string; lastName: string; email: string; company: string }[]>([]);
   const [newContacts, setNewContacts] = useState<Contact[]>([]);
@@ -237,7 +237,7 @@ export default function Home() {
                       <FileText className="w-3 h-3 mr-1.5 shrink-0 text-neutral-400" />
                       <SelectValue placeholder={loadingReports ? "Loading reports..." : "Select a report"} />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="max-h-60 overflow-y-auto">
                       <SelectItem value="__all__">All Contacts (default)</SelectItem>
                       {sfReports.map((report) => (
                         <SelectItem key={report.id} value={report.id}>
