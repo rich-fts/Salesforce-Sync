@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import type { Contact, PullResult, SendGridList, ConfigStatus, SalesforceReport, MailchimpAudience } from "@/lib/mock-data";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,6 +32,18 @@ function savePairing(sourceKey: string, listId: string) {
 
 function getSourceKey(dataSource: DataSource, sourceId: string): string {
   return `${dataSource}:${sourceId}`;
+}
+
+function getPreviouslyUsedSourceIds(source: DataSource): Set<string> {
+  const pairings = loadPairings();
+  const prefix = `${source}:`;
+  const ids = new Set<string>();
+  for (const key of Object.keys(pairings)) {
+    if (key.startsWith(prefix)) {
+      ids.add(key.slice(prefix.length));
+    }
+  }
+  return ids;
 }
 
 export default function Home() {
@@ -172,7 +184,25 @@ export default function Home() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const filteredAudiences = mcAudiences.filter((a) =>
+  const [pairingsVersion, setPairingsVersion] = useState(0);
+
+  const sortedSfReports = useMemo(() => {
+    const usedIds = getPreviouslyUsedSourceIds("salesforce");
+    if (usedIds.size === 0) return sfReports;
+    const used = sfReports.filter((r) => usedIds.has(r.id));
+    const rest = sfReports.filter((r) => !usedIds.has(r.id));
+    return [...used, ...rest];
+  }, [sfReports, pairingsVersion]);
+
+  const sortedMcAudiences = useMemo(() => {
+    const usedIds = getPreviouslyUsedSourceIds("mailchimp");
+    if (usedIds.size === 0) return mcAudiences;
+    const used = mcAudiences.filter((a) => usedIds.has(a.id));
+    const rest = mcAudiences.filter((a) => !usedIds.has(a.id));
+    return [...used, ...rest];
+  }, [mcAudiences, pairingsVersion]);
+
+  const filteredAudiences = sortedMcAudiences.filter((a) =>
     a.name.toLowerCase().includes(audienceSearch.toLowerCase())
   );
 
@@ -189,6 +219,7 @@ export default function Home() {
     const sourceId = currentSource === "mailchimp" ? selectedAudienceId : selectedReportId;
     if (sourceId && selectedListId) {
       savePairing(getSourceKey(currentSource, sourceId), selectedListId);
+      setPairingsVersion((v) => v + 1);
     }
 
     try {
@@ -446,12 +477,29 @@ export default function Home() {
                     </SelectTrigger>
                     <SelectContent className="max-h-60 overflow-y-auto">
                       <SelectItem value="__all__">All Contacts (default)</SelectItem>
-                      {sfReports.map((report) => (
-                        <SelectItem key={report.id} value={report.id}>
-                          <span className="truncate">{report.name}</span>
-                          <span className="text-neutral-400 ml-1 text-[10px]">({report.folderName})</span>
-                        </SelectItem>
-                      ))}
+                      {(() => {
+                        const usedIds = getPreviouslyUsedSourceIds("salesforce");
+                        const hasUsed = sortedSfReports.some((r) => usedIds.has(r.id));
+                        let separatorShown = false;
+                        return sortedSfReports.map((report) => {
+                          const isUsed = usedIds.has(report.id);
+                          let showSeparator = false;
+                          if (hasUsed && !isUsed && !separatorShown) {
+                            separatorShown = true;
+                            showSeparator = true;
+                          }
+                          return (
+                            <div key={report.id}>
+                              {showSeparator && <div className="my-1 border-t border-neutral-200" />}
+                              <SelectItem value={report.id}>
+                                <span className="truncate">{report.name}</span>
+                                <span className="text-neutral-400 ml-1 text-[10px]">({report.folderName})</span>
+                                {isUsed && <span className="text-blue-500 ml-1 text-[9px]">★</span>}
+                              </SelectItem>
+                            </div>
+                          );
+                        });
+                      })()}
                     </SelectContent>
                   </Select>
                 </div>
@@ -501,23 +549,41 @@ export default function Home() {
                         {filteredAudiences.length === 0 ? (
                           <div className="px-3 py-2 text-xs text-neutral-400">No audiences found</div>
                         ) : (
-                          filteredAudiences.map((audience) => (
-                            <button
-                              key={audience.id}
-                              type="button"
-                              onClick={() => {
-                                setSelectedAudienceId(audience.id);
-                                setAudienceDropdownOpen(false);
-                                setAudienceSearch("");
-                              }}
-                              className={`w-full text-left px-3 py-1.5 text-xs rounded-md hover:bg-blue-50 transition-colors flex justify-between items-center gap-2
-                                ${selectedAudienceId === audience.id ? "bg-blue-50 text-blue-700 font-medium" : "text-neutral-700"}`}
-                              data-testid={`option-audience-${audience.id}`}
-                            >
-                              <span className="truncate">{audience.name}</span>
-                              <span className="shrink-0 text-neutral-400 text-[10px]">{audience.member_count}</span>
-                            </button>
-                          ))
+                          (() => {
+                            const usedIds = getPreviouslyUsedSourceIds("mailchimp");
+                            const hasUsed = filteredAudiences.some((a) => usedIds.has(a.id));
+                            let separatorShown = false;
+                            return filteredAudiences.map((audience) => {
+                              const isUsed = usedIds.has(audience.id);
+                              let showSeparator = false;
+                              if (hasUsed && !isUsed && !separatorShown) {
+                                separatorShown = true;
+                                showSeparator = true;
+                              }
+                              return (
+                                <div key={audience.id}>
+                                  {showSeparator && <div className="my-1 border-t border-neutral-200" />}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedAudienceId(audience.id);
+                                      setAudienceDropdownOpen(false);
+                                      setAudienceSearch("");
+                                    }}
+                                    className={`w-full text-left px-3 py-1.5 text-xs rounded-md hover:bg-blue-50 transition-colors flex justify-between items-center gap-2
+                                      ${selectedAudienceId === audience.id ? "bg-blue-50 text-blue-700 font-medium" : "text-neutral-700"}`}
+                                    data-testid={`option-audience-${audience.id}`}
+                                  >
+                                    <span className="truncate">
+                                      {audience.name}
+                                      {isUsed && <span className="text-blue-500 ml-1 text-[9px]">★</span>}
+                                    </span>
+                                    <span className="shrink-0 text-neutral-400 text-[10px]">{audience.member_count}</span>
+                                  </button>
+                                </div>
+                              );
+                            });
+                          })()
                         )}
                       </div>
                     </div>
