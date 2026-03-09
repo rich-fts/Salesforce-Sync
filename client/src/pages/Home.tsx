@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { Contact, PullResult, SendGridList, ConfigStatus, SalesforceReport, MailchimpAudience } from "@/lib/mock-data";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowRight, CloudDownload, Send, AlertCircle, UserPlus, CheckCircle2, Loader2, FileText, Mail } from "lucide-react";
+import { ArrowRight, CloudDownload, Send, AlertCircle, UserPlus, CheckCircle2, Loader2, FileText, Mail, Search, ChevronDown, X } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 
 type SyncStep = "idle" | "fetching" | "analyzing" | "ready" | "uploading" | "complete";
@@ -28,6 +28,9 @@ export default function Home() {
   const [mcAudiences, setMcAudiences] = useState<MailchimpAudience[]>([]);
   const [selectedAudienceId, setSelectedAudienceId] = useState<string>("");
   const [loadingAudiences, setLoadingAudiences] = useState(false);
+  const [audienceSearch, setAudienceSearch] = useState("");
+  const [audienceDropdownOpen, setAudienceDropdownOpen] = useState(false);
+  const audienceDropdownRef = useRef<HTMLDivElement>(null);
   const [pulledContacts, setPulledContacts] = useState<ContactToSync[]>([]);
   const [contactsToSync, setContactsToSync] = useState<ContactToSync[]>([]);
   const [alreadyInSendGrid, setAlreadyInSendGrid] = useState(0);
@@ -107,6 +110,20 @@ export default function Home() {
         .catch(() => {});
     }
   }, [configStatus?.salesforce, configStatus?.sendgrid]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (audienceDropdownRef.current && !audienceDropdownRef.current.contains(e.target as Node)) {
+        setAudienceDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const filteredAudiences = mcAudiences.filter((a) =>
+    a.name.toLowerCase().includes(audienceSearch.toLowerCase())
+  );
 
   const handleFetchReport = async () => {
     setStep("fetching");
@@ -356,20 +373,70 @@ export default function Home() {
               )}
 
               {dataSource === "mailchimp" && mcConfigured && (step === "idle" || ((step === "complete" || step === "ready") && contactsToSync.length === 0)) && (
-                <div className="w-52">
-                  <Select value={selectedAudienceId} onValueChange={setSelectedAudienceId} disabled={loadingAudiences}>
-                    <SelectTrigger className="h-8 text-xs" data-testid="select-mailchimp-audience">
-                      <Mail className="w-3 h-3 mr-1.5 shrink-0 text-neutral-400" />
-                      <SelectValue placeholder={loadingAudiences ? "Loading audiences..." : "Select an audience"} />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-60 overflow-y-auto">
-                      {mcAudiences.map((audience) => (
-                        <SelectItem key={audience.id} value={audience.id}>
-                          {audience.name} ({audience.member_count})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div className="w-52 relative" ref={audienceDropdownRef}>
+                  <button
+                    type="button"
+                    onClick={() => { if (!loadingAudiences) setAudienceDropdownOpen(!audienceDropdownOpen); }}
+                    className="flex items-center w-full h-8 px-3 text-xs border rounded-md bg-white hover:bg-neutral-50 transition-colors disabled:opacity-50"
+                    disabled={loadingAudiences}
+                    data-testid="select-mailchimp-audience"
+                  >
+                    <Mail className="w-3 h-3 mr-1.5 shrink-0 text-neutral-400" />
+                    <span className="truncate flex-1 text-left">
+                      {loadingAudiences ? "Loading audiences..." : selectedAudienceId ? (mcAudiences.find(a => a.id === selectedAudienceId)?.name || "Select audience") : "Select audience"}
+                    </span>
+                    <ChevronDown className="w-3 h-3 ml-1 shrink-0 text-neutral-400" />
+                  </button>
+                  {audienceDropdownOpen && (
+                    <div className="absolute z-50 mt-1 w-64 bg-white border rounded-lg shadow-lg left-1/2 -translate-x-1/2">
+                      <div className="p-2 border-b">
+                        <div className="relative">
+                          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" />
+                          <input
+                            type="text"
+                            value={audienceSearch}
+                            onChange={(e) => setAudienceSearch(e.target.value)}
+                            placeholder="Search audiences..."
+                            className="w-full h-7 pl-7 pr-7 text-xs border rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            autoFocus
+                            data-testid="input-audience-search"
+                          />
+                          {audienceSearch && (
+                            <button
+                              type="button"
+                              onClick={() => setAudienceSearch("")}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="max-h-48 overflow-y-auto p-1">
+                        {filteredAudiences.length === 0 ? (
+                          <div className="px-3 py-2 text-xs text-neutral-400">No audiences found</div>
+                        ) : (
+                          filteredAudiences.map((audience) => (
+                            <button
+                              key={audience.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedAudienceId(audience.id);
+                                setAudienceDropdownOpen(false);
+                                setAudienceSearch("");
+                              }}
+                              className={`w-full text-left px-3 py-1.5 text-xs rounded-md hover:bg-blue-50 transition-colors flex justify-between items-center gap-2
+                                ${selectedAudienceId === audience.id ? "bg-blue-50 text-blue-700 font-medium" : "text-neutral-700"}`}
+                              data-testid={`option-audience-${audience.id}`}
+                            >
+                              <span className="truncate">{audience.name}</span>
+                              <span className="shrink-0 text-neutral-400 text-[10px]">{audience.member_count}</span>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
