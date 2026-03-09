@@ -7,6 +7,7 @@ export interface IStorage {
   getContactByEmail(email: string): Promise<Contact | undefined>;
   createContact(contact: InsertContact): Promise<Contact>;
   createContacts(contactList: InsertContact[]): Promise<Contact[]>;
+  deleteAllContacts(): Promise<number>;
   markContactsSynced(emails: string[]): Promise<void>;
   resetAllSyncFlags(): Promise<number>;
   getUnsyncedContacts(): Promise<Contact[]>;
@@ -35,6 +36,11 @@ export class DatabaseStorage implements IStorage {
     if (contactList.length === 0) return [];
     const created = await db.insert(contacts).values(contactList).onConflictDoNothing({ target: contacts.email }).returning();
     return created;
+  }
+
+  async deleteAllContacts(): Promise<number> {
+    const result = await db.delete(contacts).returning();
+    return result.length;
   }
 
   async markContactsSynced(emails: string[]): Promise<void> {

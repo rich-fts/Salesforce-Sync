@@ -33,21 +33,18 @@ export async function registerRoutes(
       const { reportId, listId } = req.body || {};
       const sfContacts = await fetchSalesforceReport(reportId || undefined);
 
-      const existingContacts = await storage.getAllContacts();
-      const existingEmails = new Set(existingContacts.map((c) => c.email));
+      await storage.deleteAllContacts();
 
-      const newContactsData: InsertContact[] = sfContacts
-        .filter((c) => !existingEmails.has(c.email))
-        .map((c) => ({
-          firstName: c.firstName,
-          lastName: c.lastName,
-          email: c.email,
-          company: c.company,
-          source: "salesforce",
-          syncedToSendgrid: false,
-        }));
+      const allContactsData: InsertContact[] = sfContacts.map((c) => ({
+        firstName: c.firstName,
+        lastName: c.lastName,
+        email: c.email,
+        company: c.company,
+        source: "salesforce",
+        syncedToSendgrid: false,
+      }));
 
-      const savedNew = await storage.createContacts(newContactsData);
+      const savedNew = await storage.createContacts(allContactsData);
 
       let sendgridEmails = new Set<string>();
       if (listId) {

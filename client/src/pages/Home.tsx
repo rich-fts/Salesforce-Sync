@@ -234,16 +234,9 @@ export default function Home() {
     <div className="min-h-screen bg-neutral-50/50 p-6 md:p-12">
       <div className="max-w-6xl mx-auto space-y-8">
 
-        <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight text-neutral-900" data-testid="text-title">Contact Sync</h1>
-            <p className="text-neutral-500 mt-1">Salesforce to SendGrid Marketing Campaign Pipeline</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <Button variant="outline" size="sm" onClick={reset} disabled={step === "idle"} data-testid="button-reset">
-              Reset Workflow
-            </Button>
-          </div>
+        <header>
+          <h1 className="text-3xl font-bold tracking-tight text-neutral-900" data-testid="text-title">Contact Sync</h1>
+          <p className="text-neutral-500 mt-1">Salesforce to SendGrid Marketing Campaign Pipeline</p>
         </header>
 
         {configStatus && (!sfConfigured || !sgConfigured) && (
@@ -283,7 +276,7 @@ export default function Home() {
                 <p className="text-xs text-neutral-500">Salesforce API</p>
               </div>
 
-              {sfConfigured && step === "idle" && (
+              {sfConfigured && (step === "idle" || ((step === "complete" || step === "ready") && contactsToSync.length === 0)) && (
                 <div className="w-52">
                   <Select value={selectedReportId} onValueChange={setSelectedReportId} disabled={loadingReports}>
                     <SelectTrigger className="h-8 text-xs" data-testid="select-salesforce-report">
@@ -302,7 +295,7 @@ export default function Home() {
                   </Select>
                 </div>
               )}
-              {step !== "idle" && (
+              {step !== "idle" && !((step === "complete" || step === "ready") && contactsToSync.length === 0) && (
                 <div className="text-xs text-neutral-500 bg-neutral-50 px-2 py-1 rounded">
                   {selectedReportName}
                 </div>
@@ -310,7 +303,7 @@ export default function Home() {
 
               <Button
                 onClick={handleFetchReport}
-                disabled={step !== "idle" || !sfConfigured}
+                disabled={!(step === "idle" || (step === "complete" && contactsToSync.length === 0) || (step === "ready" && contactsToSync.length === 0)) || !sfConfigured}
                 className="w-32"
                 data-testid="button-fetch-report"
               >
@@ -372,7 +365,7 @@ export default function Home() {
                 <p className="text-xs text-neutral-500">SendGrid API</p>
               </div>
               <div className="flex flex-col items-center gap-2">
-                {sgConfigured && sendGridLists.length > 0 && step === "idle" && (
+                {sgConfigured && sendGridLists.length > 0 && (step === "idle" || ((step === "complete" || step === "ready") && contactsToSync.length === 0)) && (
                   <Select value={selectedListId} onValueChange={setSelectedListId}>
                     <SelectTrigger className="w-44 h-8 text-xs" data-testid="select-sendgrid-list">
                       <SelectValue placeholder="Select list" />
@@ -386,7 +379,7 @@ export default function Home() {
                     </SelectContent>
                   </Select>
                 )}
-                {step !== "idle" && (
+                {step !== "idle" && !((step === "complete" || step === "ready") && contactsToSync.length === 0) && (
                   <div className="text-xs text-neutral-500 bg-neutral-50 px-2 py-1 rounded">
                     {selectedListName}
                   </div>
