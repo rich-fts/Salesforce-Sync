@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowRight, CloudDownload, Send, AlertCircle, UserPlus, CheckCircle2, Loader2, FileText, Mail, Search, ChevronDown, X } from "lucide-react";
+import { ArrowRight, CloudDownload, Send, AlertCircle, UserPlus, CheckCircle2, Loader2, FileText, Mail, Search, ChevronDown, X, Plus } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 
 type SyncStep = "idle" | "fetching" | "analyzing" | "ready" | "uploading" | "complete";
@@ -37,6 +37,9 @@ export default function Home() {
   const [syncLogId, setSyncLogId] = useState<string | null>(null);
   const [sendGridLists, setSendGridLists] = useState<SendGridList[]>([]);
   const [selectedListId, setSelectedListId] = useState<string>("115297bb-7915-4671-bdcf-2d4037d6802a");
+  const [showCreateList, setShowCreateList] = useState(false);
+  const [newListName, setNewListName] = useState("");
+  const [creatingList, setCreatingList] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
@@ -241,6 +244,35 @@ export default function Home() {
         description: err.message,
         variant: "destructive",
       });
+    }
+  };
+
+  const handleCreateList = async () => {
+    if (!newListName.trim()) return;
+    setCreatingList(true);
+    try {
+      const res = await fetch("/api/sendgrid/lists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newListName.trim() }),
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.message || "Failed to create list");
+      }
+      const newList = await res.json();
+      setSendGridLists((prev) => [...prev, newList].sort((a, b) => a.name.localeCompare(b.name)));
+      setSelectedListId(newList.id);
+      setShowCreateList(false);
+      setNewListName("");
+      toast({
+        title: "List Created",
+        description: `"${newList.name}" has been created on SendGrid.`,
+      });
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    } finally {
+      setCreatingList(false);
     }
   };
 
@@ -449,22 +481,66 @@ export default function Home() {
                 </div>
               )}
 
-              {sgConfigured && sendGridLists.length > 0 && (step === "idle" || ((step === "complete" || step === "ready") && contactsToSync.length === 0)) && (
+              {sgConfigured && (step === "idle" || ((step === "complete" || step === "ready") && contactsToSync.length === 0)) && (
                 <div className="w-52">
                   <div className="text-[10px] text-neutral-400 mb-1 text-center">Destination SendGrid List</div>
-                  <Select value={selectedListId} onValueChange={setSelectedListId}>
-                    <SelectTrigger className="h-8 text-xs" data-testid="select-sendgrid-list">
-                      <Send className="w-3 h-3 mr-1.5 shrink-0 text-neutral-400" />
-                      <SelectValue placeholder="Select list" />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-60 overflow-y-auto">
-                      {sendGridLists.map((list) => (
-                        <SelectItem key={list.id} value={list.id}>
-                          {list.name} ({list.contact_count})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {!showCreateList ? (
+                    <div className="flex flex-col gap-1.5">
+                      <Select value={selectedListId} onValueChange={setSelectedListId}>
+                        <SelectTrigger className="h-8 text-xs" data-testid="select-sendgrid-list">
+                          <Send className="w-3 h-3 mr-1.5 shrink-0 text-neutral-400" />
+                          <SelectValue placeholder="Select list" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-60 overflow-y-auto">
+                          {sendGridLists.map((list) => (
+                            <SelectItem key={list.id} value={list.id}>
+                              {list.name} ({list.contact_count})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <button
+                        type="button"
+                        onClick={() => setShowCreateList(true)}
+                        className="flex items-center justify-center gap-1 text-[10px] text-blue-600 hover:text-blue-800 transition-colors"
+                        data-testid="button-show-create-list"
+                      >
+                        <Plus className="w-3 h-3" /> Create new list
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-1.5">
+                      <input
+                        type="text"
+                        value={newListName}
+                        onChange={(e) => setNewListName(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") handleCreateList(); if (e.key === "Escape") { setShowCreateList(false); setNewListName(""); } }}
+                        placeholder="New list name..."
+                        className="w-full h-8 px-3 text-xs border rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        autoFocus
+                        disabled={creatingList}
+                        data-testid="input-new-list-name"
+                      />
+                      <div className="flex gap-1">
+                        <Button
+                          onClick={handleCreateList}
+                          disabled={!newListName.trim() || creatingList}
+                          className="flex-1 h-7 text-[11px]"
+                          data-testid="button-create-list"
+                        >
+                          {creatingList ? <Loader2 className="w-3 h-3 animate-spin" /> : "Create"}
+                        </Button>
+                        <Button
+                          onClick={() => { setShowCreateList(false); setNewListName(""); }}
+                          variant="outline"
+                          className="h-7 text-[11px] px-2"
+                          disabled={creatingList}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               {step !== "idle" && !((step === "complete" || step === "ready") && contactsToSync.length === 0) && (

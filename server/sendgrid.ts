@@ -32,6 +32,29 @@ export async function getMarketingLists(): Promise<{ id: string; name: string; c
   }));
 }
 
+export async function createMarketingList(name: string): Promise<{ id: string; name: string; contact_count: number }> {
+  const apiKey = process.env.SENDGRID_API_KEY;
+  if (!apiKey) throw new Error("SENDGRID_API_KEY is not configured.");
+
+  const response = await fetch("https://api.sendgrid.com/v3/marketing/lists", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ name }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`SendGrid API error ${response.status}: ${errorBody}`);
+  }
+
+  const data = await response.json();
+  log(`Created SendGrid marketing list: "${name}" (${data.id})`, "sendgrid");
+  return { id: data.id, name: data.name, contact_count: 0 };
+}
+
 const EMAIL_SEARCH_BATCH_SIZE = 100;
 
 export async function getListContactEmails(listId: string, emailsToCheck?: string[]): Promise<Set<string>> {

@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { fetchSalesforceReport, isSalesforceConnected, listSalesforceReports } from "./salesforce";
-import { addContactsToList, getMarketingLists, getListContactEmails } from "./sendgrid";
+import { addContactsToList, getMarketingLists, getListContactEmails, createMarketingList } from "./sendgrid";
 import { fetchMailchimpAudienceContacts, isMailchimpConnected, listMailchimpAudiences } from "./mailchimp";
 import type { InsertContact } from "@shared/schema";
 
@@ -113,6 +113,19 @@ export async function registerRoutes(
     try {
       const lists = await getMarketingLists();
       res.json(lists);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/sendgrid/lists", async (req, res) => {
+    try {
+      const { name } = req.body || {};
+      if (!name || typeof name !== "string" || !name.trim()) {
+        return res.status(400).json({ message: "List name is required" });
+      }
+      const newList = await createMarketingList(name.trim());
+      res.json(newList);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
