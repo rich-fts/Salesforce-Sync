@@ -20,6 +20,7 @@ export default function Home() {
   const [loadingReports, setLoadingReports] = useState(false);
   const [pulledContacts, setPulledContacts] = useState<{ firstName: string; lastName: string; email: string; company: string }[]>([]);
   const [newContacts, setNewContacts] = useState<Contact[]>([]);
+  const [unsyncedContacts, setUnsyncedContacts] = useState<Contact[]>([]);
   const [syncLogId, setSyncLogId] = useState<string | null>(null);
   const [sendGridLists, setSendGridLists] = useState<SendGridList[]>([]);
   const [selectedListId, setSelectedListId] = useState<string>("115297bb-7915-4671-bdcf-2d4037d6802a");
@@ -90,13 +91,15 @@ export default function Home() {
       setTimeout(() => {
         setPulledContacts(data.pulledContacts);
         setNewContacts(data.newContactDetails);
+        setUnsyncedContacts(data.unsyncedContacts || data.newContactDetails);
         setSyncLogId(data.syncLogId);
         setStep("ready");
         setProgress(100);
 
+        const unsyncedCount = data.unsyncedCount ?? data.newContacts;
         toast({
           title: "Analysis Complete",
-          description: `Found ${data.newContacts} new contacts out of ${data.totalPulled} total.`,
+          description: `${data.totalPulled} pulled, ${data.newContacts} brand new, ${unsyncedCount} total ready to sync to SendGrid.`,
         });
       }, 800);
     } catch (err: any) {
@@ -161,9 +164,23 @@ export default function Home() {
     setStep("idle");
     setPulledContacts([]);
     setNewContacts([]);
+    setUnsyncedContacts([]);
     setSyncLogId(null);
     setProgress(0);
     setError(null);
+  };
+
+  const handleResetSync = async () => {
+    try {
+      const res = await fetch("/api/contacts/reset-sync", { method: "POST" });
+      const data = await res.json();
+      toast({
+        title: "Sync Flags Reset",
+        description: `${data.resetCount} contacts marked as unsynced and ready to push again.`,
+      });
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    }
   };
 
   const sfConfigured = configStatus?.salesforce ?? false;
@@ -183,6 +200,9 @@ export default function Home() {
             <p className="text-neutral-500 mt-1">Salesforce to SendGrid Marketing Campaign Pipeline</p>
           </div>
           <div className="flex items-center gap-3">
+            <Button variant="outline" size="sm" onClick={handleResetSync} disabled={step !== "idle"} data-testid="button-reset-sync">
+              Reset Sync Flags
+            </Button>
             <Button variant="outline" size="sm" onClick={reset} disabled={step === "idle"} data-testid="button-reset">
               Reset Workflow
             </Button>
@@ -281,7 +301,7 @@ export default function Home() {
               </div>
               <div className="h-9 flex items-center">
                 {step === "analyzing" && <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 animate-pulse">Analyzing...</Badge>}
-                {["ready", "uploading", "complete"].includes(step) && <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">{newContacts.length} New Found</Badge>}
+                {["ready", "uploading", "complete"].includes(step) && <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">{unsyncedContacts.length} to Sync</Badge>}
               </div>
             </div>
 
@@ -395,16 +415,18 @@ export default function Home() {
               </CardContent>
             </Card>
 
-            {/* New Contacts */}
+            {/* Contacts to Sync */}
             <Card className={step === "analyzing" ? "opacity-50 pointer-events-none transition-opacity" : "transition-opacity"}>
               <CardHeader className="pb-4">
                 <div className="flex justify-between items-center">
                   <div>
-                    <CardTitle className="text-lg text-amber-700">New Contacts Detected</CardTitle>
-                    <CardDescription>Filtered against existing database</CardDescription>
+                    <CardTitle className="text-lg text-amber-700">Contacts to Push to SendGrid</CardTitle>
+                    <CardDescription>
+                      {newContacts.length} brand new + {unsyncedContacts.length - newContacts.length > 0 ? `${unsyncedContacts.length - newContacts.length} previously unsynced` : "0 previously unsynced"}
+                    </CardDescription>
                   </div>
                   <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100 border-none shadow-none" data-testid="badge-new-count">
-                    {newContacts.length} to Sync
+                    {unsyncedContacts.length} to Sync
                   </Badge>
                 </div>
               </CardHeader>
@@ -419,34 +441,42 @@ export default function Home() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {newContacts.length === 0 ? (
+                      {unsyncedContacts.length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={3} className="h-32 text-center text-amber-700/50">
-                            No new contacts found to sync.
+                            All contacts are already synced. Use "Reset Sync Flags" to re-push.
                           </TableCell>
                         </TableRow>
                       ) : (
-                        newContacts.map((contact) => (
-                          <TableRow key={`new-${contact.id}`} className="border-amber-100/50 hover:bg-amber-50/50">
-                            <TableCell className="font-medium text-amber-950">{contact.firstName} {contact.lastName}</TableCell>
-                            <TableCell className="text-amber-700/80">{contact.email}</TableCell>
-                            <TableCell>
-                              {step === "complete" ? (
-                                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-                                  <CheckCircle2 className="w-3 h-3 mr-1" /> Synced
-                                </Badge>
-                              ) : step === "uploading" ? (
-                                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
-                                  <Loader2 className="w-3 h-3 mr-1 animate-spin" /> Syncing
-                                </Badge>
-                              ) : (
-                                <Badge variant="outline" className="bg-white text-amber-700 border-amber-200">
-                                  Pending
-                                </Badge>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        ))
+                        unsyncedContacts.map((contact) => {
+                          const isNew = newContacts.some(nc => nc.email === contact.email);
+                          return (
+                            <TableRow key={`sync-${contact.id}`} className="border-amber-100/50 hover:bg-amber-50/50">
+                              <TableCell className="font-medium text-amber-950">
+                                <div className="flex items-center gap-2">
+                                  {contact.firstName} {contact.lastName}
+                                  {isNew && <Badge className="text-[10px] h-4 px-1 bg-amber-100 text-amber-800 hover:bg-amber-100 shadow-none border-none">NEW</Badge>}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-amber-700/80">{contact.email}</TableCell>
+                              <TableCell>
+                                {step === "complete" ? (
+                                  <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                                    <CheckCircle2 className="w-3 h-3 mr-1" /> Synced
+                                  </Badge>
+                                ) : step === "uploading" ? (
+                                  <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                                    <Loader2 className="w-3 h-3 mr-1 animate-spin" /> Syncing
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="outline" className="bg-white text-amber-700 border-amber-200">
+                                    Pending
+                                  </Badge>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })
                       )}
                     </TableBody>
                   </Table>

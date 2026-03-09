@@ -49,6 +49,8 @@ export async function registerRoutes(
 
       const savedNew = await storage.createContacts(newContactsData);
 
+      const allUnsynced = await storage.getUnsyncedContacts();
+
       const syncLog = await storage.createSyncLog({
         totalPulled: sfContacts.length,
         newContacts: savedNew.length,
@@ -60,8 +62,10 @@ export async function registerRoutes(
         syncLogId: syncLog.id,
         totalPulled: sfContacts.length,
         newContacts: savedNew.length,
+        unsyncedCount: allUnsynced.length,
         pulledContacts: sfContacts,
         newContactDetails: savedNew,
+        unsyncedContacts: allUnsynced,
       });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -111,6 +115,15 @@ export async function registerRoutes(
       if (req.body?.syncLogId) {
         await storage.updateSyncLogStatus(req.body.syncLogId, "failed").catch(() => {});
       }
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  app.post("/api/contacts/reset-sync", async (_req, res) => {
+    try {
+      const resetCount = await storage.resetSyncFlags();
+      res.json({ message: `Reset ${resetCount} contacts to unsynced`, resetCount });
+    } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
   });

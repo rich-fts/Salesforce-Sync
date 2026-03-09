@@ -9,6 +9,7 @@ export interface IStorage {
   createContacts(contactList: InsertContact[]): Promise<Contact[]>;
   markContactsSynced(emails: string[]): Promise<void>;
   getUnsyncedContacts(): Promise<Contact[]>;
+  resetSyncFlags(): Promise<number>;
   createSyncLog(log: InsertSyncLog): Promise<SyncLog>;
   updateSyncLogStatus(id: string, status: string, syncedCount?: number): Promise<SyncLog | undefined>;
   getSyncLogs(): Promise<SyncLog[]>;
@@ -43,6 +44,11 @@ export class DatabaseStorage implements IStorage {
 
   async getUnsyncedContacts(): Promise<Contact[]> {
     return db.select().from(contacts).where(eq(contacts.syncedToSendgrid, false));
+  }
+
+  async resetSyncFlags(): Promise<number> {
+    const result = await db.update(contacts).set({ syncedToSendgrid: false }).where(eq(contacts.syncedToSendgrid, true)).returning();
+    return result.length;
   }
 
   async createSyncLog(log: InsertSyncLog): Promise<SyncLog> {
