@@ -126,77 +126,133 @@ async function fetchAllContacts(conn: jsforce.Connection): Promise<SalesforceCon
   return parseContactRecords(allRecords);
 }
 
+const COLUMN_TO_SOQL: Record<string, string> = {
+  "contact.first_name": "FirstName",
+  "contact.last_name": "LastName",
+  "contact.email": "Email",
+  "contact.name": "Name",
+  "contact.title": "Title",
+  "contact.phone": "Phone",
+  "contact.mobilephone": "MobilePhone",
+  "contact.mailingcity": "MailingCity",
+  "contact.mailingstate": "MailingState",
+  "contact.mailingcountry": "MailingCountry",
+  "contact.department": "Department",
+  "contact.created_date": "CreatedDate",
+  "contact.lastmodifieddate": "LastModifiedDate",
+  "contact.owner": "Owner.Name",
+  "account.name": "Account.Name",
+  "account_name": "Account.Name",
+  "first_name": "FirstName",
+  "last_name": "LastName",
+  "email": "Email",
+  "name": "Name",
+  "title": "Title",
+  "phone": "Phone",
+  "FK_ACC_NAME": "Account.Name",
+  "fk_acc_name": "Account.Name",
+};
+
+function reportFilterToSOQL(filter: any): string | null {
+  const col = filter.column;
+  const op = filter.operator;
+  const val = filter.value;
+
+  const soqlField = COLUMN_TO_SOQL[col?.toLowerCase()] || col;
+  if (!soqlField) return null;
+
+  switch (op) {
+    case "equals": return `${soqlField} = '${escapeSOQL(val)}'`;
+    case "notEqual": return `${soqlField} != '${escapeSOQL(val)}'`;
+    case "contains": return `${soqlField} LIKE '%${escapeSOQL(val)}%'`;
+    case "notContain": return `(NOT ${soqlField} LIKE '%${escapeSOQL(val)}%')`;
+    case "startsWith": return `${soqlField} LIKE '${escapeSOQL(val)}%'`;
+    case "greaterThan": return `${soqlField} > '${escapeSOQL(val)}'`;
+    case "lessThan": return `${soqlField} < '${escapeSOQL(val)}'`;
+    case "greaterOrEqual": return `${soqlField} >= '${escapeSOQL(val)}'`;
+    case "lessOrEqual": return `${soqlField} <= '${escapeSOQL(val)}'`;
+    default: return null;
+  }
+}
+
+function escapeSOQL(val: string): string {
+  return val.replace(/'/g, "\\'");
+}
+
 async function fetchReportById(conn: jsforce.Connection, reportId: string): Promise<SalesforceContact[]> {
-  log(`Running Salesforce report ${reportId}...`, "salesforce");
+  log(`Fetching report metadata for ${reportId} to build paginated query...`, "salesforce");
 
   const { accessToken, instanceUrl } = await getCredentials();
 
-  const response = await fetch(
-    `${instanceUrl}/services/data/v59.0/analytics/reports/${reportId}?includeDetails=true`,
+  const descResponse = await fetch(
+    `${instanceUrl}/services/data/v59.0/analytics/reports/${reportId}/describe`,
     {
-      method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ reportMetadata: {} }),
     }
   );
 
-  if (!response.ok) {
-    const errorBody = await response.text();
-    log(`Salesforce Report API error: ${response.status} - ${errorBody}`, "salesforce");
-    throw new Error(`Failed to run Salesforce report: ${response.status}`);
+  if (!descResponse.ok) {
+    const errorBody = await descResponse.text();
+    log(`Report describe error: ${descResponse.status} - ${errorBody}`, "salesforce");
+    throw new Error(`Failed to describe Salesforce report: ${descResponse.status}`);
   }
 
-  const data = await response.json();
+  const metadata = await descResponse.json();
+  const reportMetadata = metadata.reportMetadata || metadata;
+  const reportType = reportMetadata.reportType?.type || "";
+  const detailColumns: string[] = reportMetadata.detailColumns || [];
+  const reportFilters: any[] = reportMetadata.reportFilters || [];
+  const reportBooleanFilter: string | null = reportMetadata.reportBooleanFilter || null;
 
-  const columns = data.reportMetadata?.detailColumns || [];
-  const rows = data.factMap?.["T!T"]?.rows || data.factMap?.["0!T"]?.rows || [];
+  log(`Report type: ${reportType}, columns: ${detailColumns.join(", ")}`, "salesforce");
+  log(`Filters: ${JSON.stringify(reportFilters)}`, "salesforce");
 
-  if (rows.length === 0) {
-    const grandTotal = Object.keys(data.factMap || {});
-    for (const key of grandTotal) {
-      if (data.factMap[key]?.rows?.length > 0) {
-        return parseReportRows(columns, data.factMap[key].rows);
-      }
+  const selectFields = new Set<string>();
+  selectFields.add("FirstName");
+  selectFields.add("LastName");
+  selectFields.add("Email");
+  selectFields.add("Account.Name");
+
+  for (const col of detailColumns) {
+    const mapped = COLUMN_TO_SOQL[col.toLowerCase()] || COLUMN_TO_SOQL[col];
+    if (mapped) selectFields.add(mapped);
+  }
+
+  const whereClauses: string[] = ["Email != null"];
+
+  const filterClauses: (string | null)[] = reportFilters.map((f: any) => reportFilterToSOQL(f));
+  const validFilterClauses = filterClauses.filter((c): c is string => c !== null);
+
+  if (validFilterClauses.length > 0) {
+    if (reportBooleanFilter) {
+      let combinedFilter = reportBooleanFilter;
+      validFilterClauses.forEach((clause, idx) => {
+        combinedFilter = combinedFilter.replace(new RegExp(`\\b${idx + 1}\\b`, "g"), `(${clause})`);
+      });
+      whereClauses.push(`(${combinedFilter})`);
+    } else {
+      whereClauses.push(...validFilterClauses);
     }
   }
 
-  const contacts = parseReportRows(columns, rows);
-  log(`Pulled ${contacts.length} contacts from report ${reportId}`, "salesforce");
-  return contacts;
-}
+  const soql = `SELECT ${Array.from(selectFields).join(", ")} FROM Contact WHERE ${whereClauses.join(" AND ")} ORDER BY CreatedDate DESC`;
+  log(`Generated SOQL: ${soql}`, "salesforce");
 
-function parseReportRows(columns: string[], rows: any[]): SalesforceContact[] {
-  const colLower = columns.map((c: string) => c.toLowerCase());
+  const allRecords: any[] = [];
+  let queryResult = await conn.query(soql);
+  allRecords.push(...(queryResult.records || []));
 
-  const emailIdx = colLower.findIndex((c: string) => c.includes("email"));
-  const firstIdx = colLower.findIndex((c: string) => c.includes("first_name") || c.includes("firstname") || c === "contact_first_name");
-  const lastIdx = colLower.findIndex((c: string) => c.includes("last_name") || c.includes("lastname") || c === "contact_last_name" || c === "name");
-  const companyIdx = colLower.findIndex((c: string) => c.includes("account") || c.includes("company") || c.includes("organization"));
-
-  if (emailIdx === -1) {
-    throw new Error("Report does not contain an email column. Please ensure your report includes email addresses.");
+  while (!queryResult.done && queryResult.nextRecordsUrl) {
+    log(`Paginating report query (${allRecords.length} records so far)...`, "salesforce");
+    queryResult = await conn.queryMore(queryResult.nextRecordsUrl);
+    allRecords.push(...(queryResult.records || []));
   }
 
-  const contacts: SalesforceContact[] = [];
-
-  for (const row of rows) {
-    const cells = row.dataCells || [];
-    const emailVal = cells[emailIdx]?.label || cells[emailIdx]?.value;
-
-    if (!emailVal || typeof emailVal !== "string" || !emailVal.includes("@")) continue;
-
-    contacts.push({
-      firstName: firstIdx >= 0 ? (cells[firstIdx]?.label || cells[firstIdx]?.value || "") : "",
-      lastName: lastIdx >= 0 ? (cells[lastIdx]?.label || cells[lastIdx]?.value || "") : "",
-      email: emailVal.toLowerCase().trim(),
-      company: companyIdx >= 0 ? (cells[companyIdx]?.label || cells[companyIdx]?.value || "Unknown") : "Unknown",
-    });
-  }
-
-  return contacts;
+  log(`Total records from report query: ${allRecords.length}`, "salesforce");
+  return parseContactRecords(allRecords);
 }
 
 function parseContactRecords(records: any[]): SalesforceContact[] {
