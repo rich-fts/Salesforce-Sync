@@ -166,6 +166,8 @@ export default function Home() {
       const data = await res.json();
 
       setTimeout(() => {
+        setAlreadyInSendGrid(alreadyInSendGrid + contactsToSync.length);
+        setContactsToSync([]);
         setStep("complete");
         setProgress(100);
         toast({
@@ -333,7 +335,11 @@ export default function Home() {
                 {step === "analyzing" && <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 animate-pulse">Comparing...</Badge>}
                 {["ready", "uploading", "complete"].includes(step) && (
                   <div className="flex flex-col items-center gap-1">
-                    <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">{contactsToSync.length} to Push</Badge>
+                    {step === "complete" && contactsToSync.length === 0 ? (
+                      <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">All Synced</Badge>
+                    ) : (
+                      <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">{contactsToSync.length} to Push</Badge>
+                    )}
                     {alreadyInSendGrid > 0 && (
                       <span className="text-[10px] text-neutral-400">{alreadyInSendGrid} already in list</span>
                     )}
