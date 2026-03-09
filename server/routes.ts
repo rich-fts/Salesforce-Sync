@@ -113,6 +113,15 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/contacts/reset-sync", async (_req, res) => {
+    try {
+      const count = await storage.resetAllSyncFlags();
+      res.json({ reset: count });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.post("/api/sendgrid/push", async (req, res) => {
     try {
       const { listId, syncLogId } = req.body;

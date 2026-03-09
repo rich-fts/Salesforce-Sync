@@ -185,6 +185,30 @@ export default function Home() {
     }
   };
 
+  const handleRepush = async () => {
+    try {
+      const resetRes = await fetch("/api/contacts/reset-sync", { method: "POST" });
+      if (!resetRes.ok) throw new Error("Failed to reset sync flags");
+      const resetData = await resetRes.json();
+
+      const pendingRes = await fetch("/api/contacts/pending");
+      if (!pendingRes.ok) throw new Error("Failed to fetch pending contacts");
+      const pendingData = await pendingRes.json();
+
+      setContactsToSync(pendingData.contacts);
+      setAlreadyInSendGrid(pendingData.synced);
+      setPulledContacts(pendingData.contacts);
+      setStep("ready");
+      setProgress(100);
+      toast({
+        title: "Ready to Re-push",
+        description: `${resetData.reset} contacts reset and ready to push again.`,
+      });
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    }
+  };
+
   const reset = () => {
     setStep("idle");
     setPulledContacts([]);
@@ -361,6 +385,16 @@ export default function Home() {
                     : step === "complete" ? <><CheckCircle2 className="w-4 h-4 mr-2" /> Synced</>
                     : "Upload"}
                 </Button>
+                {step === "complete" && (
+                  <Button
+                    onClick={handleRepush}
+                    variant="outline"
+                    className="w-32 text-xs"
+                    data-testid="button-repush"
+                  >
+                    Re-push All
+                  </Button>
+                )}
               </div>
             </div>
           </div>
