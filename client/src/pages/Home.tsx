@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import type { Contact, PullResult, SendGridList, ConfigStatus, SalesforceReport, MailchimpAudience } from "@/lib/mock-data";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,6 +14,25 @@ type SyncStep = "idle" | "fetching" | "analyzing" | "ready" | "uploading" | "com
 type ContactToSync = { firstName: string; lastName: string; email: string; company: string };
 
 type DataSource = "salesforce" | "mailchimp";
+
+const PAIRINGS_STORAGE_KEY = "source-destination-pairings";
+
+function loadPairings(): Record<string, string> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PAIRINGS_STORAGE_KEY) || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch { return {}; }
+}
+
+function savePairing(sourceKey: string, listId: string) {
+  const pairings = loadPairings();
+  pairings[sourceKey] = listId;
+  localStorage.setItem(PAIRINGS_STORAGE_KEY, JSON.stringify(pairings));
+}
+
+function getSourceKey(dataSource: DataSource, sourceId: string): string {
+  return `${dataSource}:${sourceId}`;
+}
 
 export default function Home() {
   const { toast } = useToast();
@@ -79,6 +98,24 @@ export default function Home() {
     }
   }, [configStatus?.mailchimp]);
 
+  const applyPairing = useCallback((source: DataSource, sourceId: string, lists?: SendGridList[]) => {
+    if (!sourceId) return;
+    const key = getSourceKey(source, sourceId);
+    const pairings = loadPairings();
+    const pairedListId = pairings[key];
+    const availableLists = lists || sendGridLists;
+    if (pairedListId && availableLists.some((l) => l.id === pairedListId)) {
+      setSelectedListId(pairedListId);
+    } else if (availableLists.length > 0) {
+      setSelectedListId(availableLists[0].id);
+    }
+  }, [sendGridLists]);
+
+  useEffect(() => {
+    const sourceId = dataSource === "mailchimp" ? selectedAudienceId : selectedReportId;
+    applyPairing(dataSource, sourceId);
+  }, [dataSource, selectedReportId, selectedAudienceId, applyPairing]);
+
   useEffect(() => {
     if (configStatus?.sendgrid) {
       fetch("/api/sendgrid/lists")
@@ -86,7 +123,15 @@ export default function Home() {
         .then((data) => {
           if (Array.isArray(data)) {
             setSendGridLists(data);
-            if (!selectedListId && data.length > 0) setSelectedListId(data[0].id);
+            const sourceId = dataSource === "mailchimp" ? selectedAudienceId : selectedReportId;
+            const key = getSourceKey(dataSource, sourceId);
+            const pairings = loadPairings();
+            const pairedListId = pairings[key];
+            if (pairedListId && data.some((l: SendGridList) => l.id === pairedListId)) {
+              setSelectedListId(pairedListId);
+            } else if (data.length > 0) {
+              setSelectedListId(data[0].id);
+            }
           }
         })
         .catch(() => {});
@@ -140,6 +185,11 @@ export default function Home() {
     const currentSourceName = dataSource === "mailchimp" ? selectedAudienceName : selectedReportName;
     setFetchedSource(currentSource);
     setFetchedSourceName(currentSourceName);
+
+    const sourceId = currentSource === "mailchimp" ? selectedAudienceId : selectedReportId;
+    if (sourceId && selectedListId) {
+      savePairing(getSourceKey(currentSource, sourceId), selectedListId);
+    }
 
     try {
       let url: string;
